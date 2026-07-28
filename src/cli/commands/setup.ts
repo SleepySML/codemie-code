@@ -30,6 +30,7 @@ interface LiteLLMEnforcementContext {
   integration: CodeMieIntegration;
   project: string;
   authResult: SSOAuthResult;
+  codeMieUrl: string;
 }
 
 export type EnforcementGateResult =
@@ -52,8 +53,11 @@ export async function detectLiteLLMEnforcement(existingCodeMieUrl?: string): Pro
     if (projectIntegrations.length > 1) {
       logger.warn(`Multiple LiteLLM integrations found for project "${project}". Using "${projectIntegrations[0].alias}".`);
     }
-    return { enforced: true, integration: projectIntegrations[0], project, authResult };
+    return { enforced: true, integration: projectIntegrations[0], project, authResult, codeMieUrl };
   } catch (error) {
+    if ((error as any)?.name === 'ExitPromptError' || (error as any)?.name === 'AbortPromptError') {
+      throw error;
+    }
     const errorMessage = error instanceof Error ? error.message : String(error);
     logger.warn(`Could not check for mandatory integrations: ${errorMessage}`);
     console.log(chalk.yellow(`\n⚠️  Could not check for mandatory integrations (${errorMessage}). Continuing with normal provider setup.\n`));
@@ -240,8 +244,7 @@ async function runSetupWizard(force?: boolean): Promise<void> {
   }
 
   // Step 1: Check for mandatory LiteLLM integration before provider selection
-  // Skip SSO gate on update flows — enforcement only applies to fresh configurations.
-  const enforcementResult = isUpdate ? { enforced: false as const } : await detectLiteLLMEnforcement();
+  const enforcementResult = await detectLiteLLMEnforcement();
 
   let provider: string;
   let enforcementContext: LiteLLMEnforcementContext | undefined;
@@ -249,15 +252,16 @@ async function runSetupWizard(force?: boolean): Promise<void> {
   if (enforcementResult.enforced) {
     const litellmSteps = ProviderRegistry.getSetupSteps('litellm');
     if (!litellmSteps) {
-      throw new Error('LiteLLM provider is required by your project integration but is not configured');
+      throw new Error('LiteLLM integration is required for this project but the LiteLLM provider is not available. Please reinstall codemie-cli.');
     }
     provider = 'litellm';
     enforcementContext = {
       integration: enforcementResult.integration,
       project: enforcementResult.project,
-      authResult: enforcementResult.authResult
+      authResult: enforcementResult.authResult,
+      codeMieUrl: enforcementResult.codeMieUrl
     };
-    console.log(chalk.cyan(`\n🔒 LiteLLM integration "${enforcementResult.integration.alias}" is required for project "${enforcementResult.project}". Proceeding with LiteLLM setup.\n`));
+    console.log(chalk.cyan(`\n📌 This project uses a mandatory LiteLLM integration: "${enforcementResult.integration.alias}"\n   Provider has been set to LiteLLM automatically.\n`));
   } else {
     // Step 1b: Normal provider selection
     const registeredProviders = ProviderRegistry.getAllProviders();
@@ -314,7 +318,7 @@ async function handlePluginSetup(
           enforcedIntegration: {
             id: enforcementContext.integration.id,
             alias: enforcementContext.integration.alias,
-            codeMieUrl: enforcementContext.authResult.apiUrl!
+            codeMieUrl: enforcementContext.codeMieUrl
           }
         }
       : undefined;

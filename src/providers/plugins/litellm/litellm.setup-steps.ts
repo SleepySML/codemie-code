@@ -43,9 +43,11 @@ export const LiteLLMSetupSteps: ProviderSetupSteps = {
       }
     ]);
 
+    const key = answers.apiKey?.trim();
+    if (enforced && !key) throw new Error('API Key is required for this integration.');
     return {
       baseUrl: answers.baseUrl.trim(),
-      apiKey: enforced ? (answers.apiKey?.trim() ?? '') : (answers.apiKey?.trim() || 'not-required')
+      apiKey: enforced ? (key ?? '') : (key || 'not-required')
     };
   },
 
