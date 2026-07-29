@@ -12,7 +12,13 @@ vi.mock('../../../providers/plugins/sso/sso.http-client.js', () => ({
 }));
 
 vi.mock('../../../utils/logger.js', () => ({
-  logger: { warn: vi.fn(), debug: vi.fn(), error: vi.fn(), success: vi.fn() }
+  logger: {
+    warn: vi.fn(),
+    debug: vi.fn(),
+    error: vi.fn(),
+    success: vi.fn(),
+    getLogFilePath: vi.fn().mockReturnValue(null)
+  }
 }));
 
 vi.mock('chalk', () => ({
@@ -55,7 +61,8 @@ vi.mock('../../../utils/config.js', () => ({
     listProfiles: vi.fn().mockResolvedValue([]),
     saveProfile: vi.fn().mockResolvedValue(undefined),
     saveUserEmail: vi.fn().mockResolvedValue(undefined),
-    getActiveProfileName: vi.fn().mockResolvedValue('my-profile')
+    getActiveProfileName: vi.fn().mockResolvedValue('my-profile'),
+    getProfile: vi.fn().mockResolvedValue(null)
   }
 }));
 
@@ -82,12 +89,22 @@ const { ProviderRegistry } = await import('../../../providers/index.js');
 const { ConfigLoader } = await import('../../../utils/config.js');
 const setupModule = await import('../setup.js');
 
+/**
+ * Minimal Error subclass matching how `inquirer` labels prompt aborts.
+ */
+class ExitPromptError extends Error {
+  constructor(message = 'User force closed the prompt') {
+    super(message);
+    this.name = 'ExitPromptError';
+  }
+}
+
 describe('detectLiteLLMEnforcement', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('returns enforced:true when integration exists for selected project', async () => {
+  it('returns enforced:true (with codeMieUrl) when integration exists for selected project', async () => {
     vi.mocked(authHelpers.promptForCodeMieUrl).mockResolvedValue('https://codemie.example.com');
     vi.mocked(authHelpers.authenticateWithCodeMie).mockResolvedValue({
       success: true,
@@ -108,7 +125,30 @@ describe('detectLiteLLMEnforcement', () => {
     if (result.enforced) {
       expect(result.integration.alias).toBe('my-integration');
       expect(result.project).toBe('my-project');
+      // Portal URL (from promptForCodeMieUrl) must be the value carried through,
+      // NOT authResult.apiUrl (the REST API base) — regression guard for CR-004.
+      expect(result.codeMieUrl).toBe('https://codemie.example.com');
     }
+  });
+
+  it('threads the caller-provided existingCodeMieUrl into promptForCodeMieUrl', async () => {
+    vi.mocked(authHelpers.promptForCodeMieUrl).mockResolvedValue('https://saved.example.com');
+    vi.mocked(authHelpers.authenticateWithCodeMie).mockResolvedValue({
+      success: true,
+      apiUrl: 'https://saved.example.com/api',
+      cookies: { session: 'abc' }
+    });
+    vi.mocked(authHelpers.selectCodeMieProject).mockResolvedValue({
+      project: 'my-project',
+      userEmail: 'user@example.com'
+    });
+    vi.mocked(ssoClient.fetchCodeMieIntegrations).mockResolvedValue([]);
+
+    await setupModule.detectLiteLLMEnforcement('https://saved.example.com');
+
+    expect(vi.mocked(authHelpers.promptForCodeMieUrl)).toHaveBeenCalledWith(
+      'https://saved.example.com'
+    );
   });
 
   it('returns enforced:false when no integration exists for the project', async () => {
@@ -123,6 +163,28 @@ describe('detectLiteLLMEnforcement', () => {
       userEmail: 'user@example.com'
     });
     vi.mocked(ssoClient.fetchCodeMieIntegrations).mockResolvedValue([]);
+
+    const result = await setupModule.detectLiteLLMEnforcement();
+
+    expect(result.enforced).toBe(false);
+  });
+
+  it('returns enforced:false when the only project integration is NOT credential_type=LiteLLM', async () => {
+    vi.mocked(authHelpers.promptForCodeMieUrl).mockResolvedValue('https://codemie.example.com');
+    vi.mocked(authHelpers.authenticateWithCodeMie).mockResolvedValue({
+      success: true,
+      apiUrl: 'https://codemie.example.com/api',
+      cookies: { session: 'abc' }
+    });
+    vi.mocked(authHelpers.selectCodeMieProject).mockResolvedValue({
+      project: 'my-project',
+      userEmail: 'user@example.com'
+    });
+    // Same project, but the integration is GitHub — must NOT enforce LiteLLM.
+    // Regression guard: removing the `credential_type === 'LiteLLM'` filter must fail this test.
+    vi.mocked(ssoClient.fetchCodeMieIntegrations).mockResolvedValue([
+      { id: 'gh-1', alias: 'my-github', project_name: 'my-project', credential_type: 'GitHub' }
+    ]);
 
     const result = await setupModule.detectLiteLLMEnforcement();
 
@@ -175,9 +237,35 @@ describe('detectLiteLLMEnforcement', () => {
 
     expect(result.enforced).toBe(false);
   });
+
+  it('re-throws ExitPromptError from promptForCodeMieUrl instead of swallowing it', async () => {
+    vi.mocked(authHelpers.promptForCodeMieUrl).mockRejectedValue(new ExitPromptError());
+
+    await expect(setupModule.detectLiteLLMEnforcement()).rejects.toMatchObject({
+      name: 'ExitPromptError'
+    });
+    // Regression guard for CR-005: swallowing Ctrl+C as { enforced: false } would
+    // let the user bypass the mandatory integration.
+    expect(vi.mocked(authHelpers.authenticateWithCodeMie)).not.toHaveBeenCalled();
+  });
+
+  it('re-throws ExitPromptError from selectCodeMieProject as well', async () => {
+    vi.mocked(authHelpers.promptForCodeMieUrl).mockResolvedValue('https://codemie.example.com');
+    vi.mocked(authHelpers.authenticateWithCodeMie).mockResolvedValue({
+      success: true,
+      apiUrl: 'https://codemie.example.com/api',
+      cookies: { session: 'abc' }
+    });
+    vi.mocked(authHelpers.selectCodeMieProject).mockRejectedValue(new ExitPromptError());
+
+    await expect(setupModule.detectLiteLLMEnforcement()).rejects.toMatchObject({
+      name: 'ExitPromptError'
+    });
+    expect(vi.mocked(ssoClient.fetchCodeMieIntegrations)).not.toHaveBeenCalled();
+  });
 });
 
-describe('runSetupWizardForTest wiring', () => {
+describe('createSetupCommand — setup wizard wiring', () => {
   const mockGetCredentials = vi.fn();
   const mockFetchModels = vi.fn();
   const mockBuildConfig = vi.fn();
@@ -190,6 +278,7 @@ describe('runSetupWizardForTest wiring', () => {
     vi.mocked(ConfigLoader.listProfiles).mockResolvedValue([]);
     vi.mocked(ConfigLoader.saveProfile).mockResolvedValue(undefined);
     vi.mocked(ConfigLoader.getActiveProfileName).mockResolvedValue('my-profile');
+    vi.mocked(ConfigLoader.getProfile).mockResolvedValue(null);
 
     mockFetchModels.mockResolvedValue([]);
     mockBuildConfig.mockReturnValue({ provider: 'litellm', baseUrl: 'http://litellm', apiKey: 'sk-test' });
@@ -204,7 +293,7 @@ describe('runSetupWizardForTest wiring', () => {
     vi.mocked(ProviderRegistry.getAllProviders).mockReturnValue([]);
   });
 
-  it('auto-selects litellm and passes SetupContext to getCredentials when enforcement detected', async () => {
+  it('auto-selects litellm and passes SetupContext (including codeMieUrl) to getCredentials when enforcement detected', async () => {
     // Arrange: gate returns enforced
     vi.mocked(authHelpers.promptForCodeMieUrl).mockResolvedValue('https://codemie.example.com');
     vi.mocked(authHelpers.authenticateWithCodeMie).mockResolvedValue({
@@ -227,17 +316,22 @@ describe('runSetupWizardForTest wiring', () => {
       .mockResolvedValueOnce({ manualModel: 'gpt-4-turbo' })
       .mockResolvedValueOnce({ newProfileName: 'my-profile' });
 
-    // Act
-    await setupModule.runSetupWizardForTest();
+    // Act — drive through the module boundary (createSetupCommand), not a test-only export
+    const command = setupModule.createSetupCommand();
+    await command.parseAsync([], { from: 'user' });
 
     // Assert: litellm was selected (ProviderRegistry.getSetupSteps was called with 'litellm')
     expect(ProviderRegistry.getSetupSteps).toHaveBeenCalledWith('litellm');
 
-    // Assert: getCredentials received SetupContext with enforcedIntegration
+    // Assert: getCredentials received SetupContext with enforcedIntegration.
+    // Explicitly assert codeMieUrl so a regression to authResult.apiUrl (CR-004) is caught here.
     expect(mockGetCredentials).toHaveBeenCalledWith(
       false,
       expect.objectContaining({
-        enforcedIntegration: expect.objectContaining({ alias: 'forced-int' })
+        enforcedIntegration: expect.objectContaining({
+          alias: 'forced-int',
+          codeMieUrl: 'https://codemie.example.com'
+        })
       })
     );
   });
@@ -256,9 +350,26 @@ describe('runSetupWizardForTest wiring', () => {
       .mockResolvedValueOnce({ newProfileName: 'my-profile' });
 
     // Act
-    await setupModule.runSetupWizardForTest();
+    const command = setupModule.createSetupCommand();
+    await command.parseAsync([], { from: 'user' });
 
     // Assert: getCredentials called WITHOUT enforcedIntegration context
     expect(mockGetCredentials).toHaveBeenCalledWith(false, undefined);
+  });
+
+  it('handles ExitPromptError from the enforcement gate cleanly — no getCredentials call, no raw stack', async () => {
+    // Arrange: user hits Ctrl+C during promptForCodeMieUrl inside the gate.
+    vi.mocked(authHelpers.promptForCodeMieUrl).mockRejectedValue(new ExitPromptError());
+
+    // Storage prompt still resolves normally before the gate runs.
+    vi.mocked(inquirerMod.default.prompt).mockResolvedValueOnce({ storage: 'global' });
+
+    // Act — must not throw out of the wizard; ExitPromptError should be caught,
+    // "Setup cancelled." printed, and the wizard should return.
+    const command = setupModule.createSetupCommand();
+    await expect(command.parseAsync([], { from: 'user' })).resolves.toBeDefined();
+
+    // Assert: setup did NOT proceed past the enforcement gate.
+    expect(mockGetCredentials).not.toHaveBeenCalled();
   });
 });

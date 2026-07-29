@@ -55,7 +55,7 @@ export async function detectLiteLLMEnforcement(existingCodeMieUrl?: string): Pro
     }
     return { enforced: true, integration: projectIntegrations[0], project, authResult, codeMieUrl };
   } catch (error) {
-    if ((error as any)?.name === 'ExitPromptError' || (error as any)?.name === 'AbortPromptError') {
+    if (isPromptAbortError(error)) {
       throw error;
     }
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -63,6 +63,19 @@ export async function detectLiteLLMEnforcement(existingCodeMieUrl?: string): Pro
     console.log(chalk.yellow(`\n⚠️  Could not check for mandatory integrations (${errorMessage}). Continuing with normal provider setup.\n`));
     return { enforced: false };
   }
+}
+
+/**
+ * Detect an inquirer prompt abort (Ctrl+C during a prompt).
+ *
+ * Uses `instanceof Error` narrowing rather than an `any` cast so the check
+ * complies with the repo-wide no-any policy.
+ */
+function isPromptAbortError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === 'ExitPromptError' || error.name === 'AbortPromptError')
+  );
 }
 
 
@@ -244,7 +257,29 @@ async function runSetupWizard(force?: boolean): Promise<void> {
   }
 
   // Step 1: Check for mandatory LiteLLM integration before provider selection
-  const enforcementResult = await detectLiteLLMEnforcement();
+  //
+  // On update flows, thread the existing profile's stored portal URL so users
+  // are not re-prompted for a URL they already configured. On fresh setup
+  // (no profile selected yet) `existingCodeMieUrl` stays undefined and
+  // `detectLiteLLMEnforcement` falls back to `DEFAULT_CODEMIE_BASE_URL`.
+  let existingCodeMieUrl: string | undefined;
+  if (isUpdate && profileName) {
+    const existingProfile = await ConfigLoader.getProfile(profileName);
+    existingCodeMieUrl = existingProfile?.codeMieUrl;
+  }
+
+  let enforcementResult: EnforcementGateResult;
+  try {
+    enforcementResult = await detectLiteLLMEnforcement(existingCodeMieUrl);
+  } catch (error) {
+    // Ctrl+C during the enforcement gate's SSO prompts should exit cleanly,
+    // not surface as a raw stack trace via the Commander action handler.
+    if (isPromptAbortError(error)) {
+      console.log(chalk.yellow('\nSetup cancelled.\n'));
+      return;
+    }
+    throw error;
+  }
 
   let provider: string;
   let enforcementContext: LiteLLMEnforcementContext | undefined;
@@ -727,8 +762,6 @@ async function autoSelectModelTiers(
 
   return result;
 }
-
-export { runSetupWizard as runSetupWizardForTest };
 
 /**
  * Check and install Claude Code if needed

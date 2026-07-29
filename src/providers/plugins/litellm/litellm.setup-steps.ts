@@ -7,7 +7,6 @@
 import type { ProviderSetupSteps, ProviderCredentials, SetupContext } from '../../core/types.js';
 import { LiteLLMTemplate } from './litellm.template.js';
 import inquirer from 'inquirer';
-import chalk from 'chalk';
 
 export const LiteLLMSetupSteps: ProviderSetupSteps = {
   name: 'litellm',
@@ -15,10 +14,13 @@ export const LiteLLMSetupSteps: ProviderSetupSteps = {
   async getCredentials(_isUpdate = false, context?: SetupContext): Promise<ProviderCredentials> {
     const enforced = context?.enforcedIntegration;
 
-    if (enforced) {
-      console.log(chalk.cyan(`\n🔒 LiteLLM integration required: "${enforced.alias}"`));
-      console.log(chalk.dim('   Get your API key from your CodeMie portal (Settings → Integrations).\n'));
-    }
+    // No dedicated enforcement banner here — the spec-mandated `📌` banner is
+    // printed once by the setup wizard before this step runs. Surface the
+    // portal URL directly in the API-key prompt and validator so the user has
+    // a concrete link to reach the credential.
+    const portalHint = enforced?.codeMieUrl
+      ? ` — retrieve it from ${enforced.codeMieUrl}`
+      : '';
 
     const answers = await inquirer.prompt([
       {
@@ -32,13 +34,13 @@ export const LiteLLMSetupSteps: ProviderSetupSteps = {
         type: 'password',
         name: 'apiKey',
         message: enforced
-          ? `API Key for integration "${enforced.alias}" (required):`
+          ? `API Key for integration "${enforced.alias}" (required)${portalHint}:`
           : 'API Key (optional, leave empty if not required):',
         mask: '*',
         validate: enforced
           ? (input: string) =>
               input.trim() !== '' ||
-              'API Key is required for this integration. Retrieve it from your CodeMie portal.'
+              `API Key is required for this integration${portalHint || ' — retrieve it from your CodeMie portal'}.`
           : undefined
       }
     ]);
@@ -47,7 +49,7 @@ export const LiteLLMSetupSteps: ProviderSetupSteps = {
     if (enforced && !key) throw new Error('API Key is required for this integration.');
     return {
       baseUrl: answers.baseUrl.trim(),
-      apiKey: enforced ? (key ?? '') : (key || 'not-required')
+      apiKey: enforced ? key : (key || 'not-required')
     };
   },
 
