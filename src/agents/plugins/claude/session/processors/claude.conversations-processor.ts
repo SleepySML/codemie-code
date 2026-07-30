@@ -99,54 +99,85 @@ export class ConversationsProcessor implements SessionProcessor {
         await mkdir(outputDir, { recursive: true });
       }
   
-      // Process ONE turn (incremental mode)
-      const result = await this.transformMessages(
-        session.messages as any[],
-        syncState,
-        '5a430368-9e91-4564-be20-989803bf4da2',
-        session.agentName,
-        context.agentSessionFile
-      );
+      // Drain every pending turn in this invocation. Claude Code fires the
+      // `Stop` hook only when the assistant responds — a run of `!bash`
+      // commands with no assistant reply produces zero `Stop` events, so if we
+      // stopped after one turn most bash commands (and the following real
+      // question) would never make it to the log before `SessionEnd` finalized
+      // the transcript (EPMCDME-13675). The loop is bounded by the count of
+      // unprocessed real user messages and terminates naturally when
+      // transformMessages returns an empty history.
+      let localSync = { ...syncState };
+      let totalRecords = 0;
+      let turnsWritten = 0;
+      let lastSyncUpdate: {
+        conversations: {
+          lastSyncedMessageUuid: string;
+          lastSyncedHistoryIndex: number;
+        };
+      } | undefined;
 
-      if (result.history.length === 0) {
+      while (true) {
+        const result = await this.transformMessages(
+          session.messages as any[],
+          localSync,
+          '5a430368-9e91-4564-be20-989803bf4da2',
+          session.agentName,
+          context.agentSessionFile
+        );
+
+        if (result.history.length === 0) {
+          break;
+        }
+
+        const historyIndices = result.history.map((entry: any) => entry.history_index);
+
+        const payloadRecord = {
+          payloadId: result.lastProcessedMessageUuid,
+          timestamp: Date.now(),
+          isTurnContinuation: result.isTurnContinuation,
+          historyIndices,
+          messageCount: result.history.length,
+          lastProcessedMessageUuid: result.lastProcessedMessageUuid,
+          payload: {
+            conversationId: context.agentSessionId,
+            history: result.history
+          },
+          status: CONVERSATION_SYNC_STATUS.PENDING
+        };
+
+        await appendFile(conversationsPath, JSON.stringify(payloadRecord) + '\n');
+
+        totalRecords += result.history.length;
+        turnsWritten++;
+        lastSyncUpdate = {
+          conversations: {
+            lastSyncedMessageUuid: result.lastProcessedMessageUuid,
+            lastSyncedHistoryIndex: result.currentHistoryIndex
+          }
+        };
+        localSync = {
+          lastSyncedMessageUuid: result.lastProcessedMessageUuid,
+          lastSyncedHistoryIndex: result.currentHistoryIndex
+        };
+      }
+
+      if (turnsWritten === 0) {
         logger.debug(`[${this.name}] No history generated from messages`);
         return { success: true, message: 'No history generated', metadata: { recordsProcessed: 0 } };
       }
 
-      // Extract history indices from the result
-      const historyIndices = result.history.map((entry: any) => entry.history_index);
+      logger.info(
+        `[${this.name}] Generated ${turnsWritten} turn${turnsWritten !== 1 ? 's' : ''} ` +
+        `with ${totalRecords} conversation messages`
+      );
 
-      // Create payload record with status 'pending'
-      const payloadRecord = {
-        payloadId: result.lastProcessedMessageUuid,
-        timestamp: Date.now(),
-        isTurnContinuation: result.isTurnContinuation,
-        historyIndices,
-        messageCount: result.history.length,
-        lastProcessedMessageUuid: result.lastProcessedMessageUuid,
-        payload: {
-          conversationId: context.agentSessionId,
-          history: result.history
-        },
-        status: CONVERSATION_SYNC_STATUS.PENDING
-      };
-
-      await appendFile(conversationsPath, JSON.stringify(payloadRecord) + '\n');
-
-      logger.info(`[${this.name}] Generated 1 turn with ${result.history.length} conversation messages`);
-
-      // Return sync updates for the adapter to persist
       return {
         success: true,
-        message: 'Generated 1 turn',
+        message: `Generated ${turnsWritten} turn${turnsWritten !== 1 ? 's' : ''}`,
         metadata: {
-          recordsProcessed: result.history.length,
-          syncUpdates: {
-            conversations: {
-              lastSyncedMessageUuid: result.lastProcessedMessageUuid,
-              lastSyncedHistoryIndex: result.currentHistoryIndex
-            }
-          }
+          recordsProcessed: totalRecords,
+          syncUpdates: lastSyncUpdate
         }
       };
 
@@ -589,6 +620,12 @@ export class ConversationsProcessor implements SessionProcessor {
       '<local-command-caveat>',
       'Unknown slash command:',
       '<local-command-stdout>',
+      // Claude Code injects the terminal output of a `!` bash command as a
+      // synthetic `type:'user'` message. Filter both so they don't consume a
+      // fresh turn slot; the corresponding `<bash-input>` message is preserved
+      // and unwrapped into `!<cmd>` by extractCommand.
+      '<bash-stdout>',
+      '<bash-stderr>',
       '[Request interrupted by user'
     ];
 
@@ -762,7 +799,17 @@ export class ConversationsProcessor implements SessionProcessor {
 
   private extractCommand(content: string): string | null {
     const commandMatch = content.match(/<command-name>(\/[^<]+)<\/command-name>/);
-    return commandMatch ? commandMatch[1] : null;
+    if (commandMatch) {
+      return commandMatch[1];
+    }
+    // Claude Code's `!` bash passthrough is written to the transcript as
+    // `<bash-input>ls -al</bash-input>`. Unwrap to the `!<cmd>` form the user
+    // actually typed so the conversation log matches the terminal (EPMCDME-13675).
+    const bashMatch = content.match(/<bash-input>([\s\S]*?)<\/bash-input>/);
+    if (bashMatch) {
+      return `!${bashMatch[1].trim()}`;
+    }
+    return null;
   }
 
   private extractToolCalls(msg: any): any[] {
