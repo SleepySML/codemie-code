@@ -107,6 +107,14 @@ export class ConversationsProcessor implements SessionProcessor {
       // the transcript (EPMCDME-13675). The loop is bounded by the count of
       // unprocessed real user messages and terminates naturally when
       // transformMessages returns an empty history.
+      //
+      // Safety: (a) hard iteration cap tied to the total message count so a
+      // regression in transformMessages cannot spin forever inside a single
+      // processSession call; (b) advance guard that breaks the loop if the
+      // sync pointer fails to advance between iterations (CR-001). After each
+      // successful append we also persist the sync pointer to the session
+      // metadata so a crash mid-drain cannot cause the next invocation to
+      // re-append already-written turns (CR-002).
       let localSync = { ...syncState };
       let totalRecords = 0;
       let turnsWritten = 0;
@@ -117,7 +125,12 @@ export class ConversationsProcessor implements SessionProcessor {
         };
       } | undefined;
 
-      while (true) {
+      const maxIterations = Math.max(1, session.messages.length + 1);
+
+      for (let iteration = 0; iteration < maxIterations; iteration++) {
+        const prevMessageUuid = localSync.lastSyncedMessageUuid;
+        const prevHistoryIndex = localSync.lastSyncedHistoryIndex;
+
         const result = await this.transformMessages(
           session.messages as any[],
           localSync,
@@ -127,6 +140,18 @@ export class ConversationsProcessor implements SessionProcessor {
         );
 
         if (result.history.length === 0) {
+          break;
+        }
+
+        if (
+          result.lastProcessedMessageUuid === prevMessageUuid &&
+          result.currentHistoryIndex === prevHistoryIndex
+        ) {
+          logger.warn(
+            `[${this.name}] Drain loop halted: sync pointer did not advance ` +
+            `(uuid=${prevMessageUuid ?? 'none'}, historyIndex=${prevHistoryIndex}). ` +
+            `Aborting after ${turnsWritten} turn(s) to avoid an infinite loop.`
+          );
           break;
         }
 
@@ -160,6 +185,30 @@ export class ConversationsProcessor implements SessionProcessor {
           lastSyncedMessageUuid: result.lastProcessedMessageUuid,
           lastSyncedHistoryIndex: result.currentHistoryIndex
         };
+
+        // Persist the sync checkpoint per iteration so a crash after this
+        // append cannot cause the next invocation to re-append the same
+        // records (CR-002). The outer applyProcessingSyncUpdates pass still
+        // runs and is idempotent for these fields.
+        sessionMetadata.sync = sessionMetadata.sync ?? {};
+        const priorConv = sessionMetadata.sync.conversations ?? {};
+        sessionMetadata.sync.conversations = {
+          ...priorConv,
+          lastSyncedMessageUuid: result.lastProcessedMessageUuid,
+          lastSyncedHistoryIndex: Math.max(
+            priorConv.lastSyncedHistoryIndex ?? -1,
+            result.currentHistoryIndex
+          )
+        };
+        try {
+          await sessionStore.saveSession(sessionMetadata);
+        } catch (persistError) {
+          logger.warn(
+            `[${this.name}] Failed to persist per-iteration sync checkpoint for session ` +
+            `${session.sessionId}: ${persistError instanceof Error ? persistError.message : String(persistError)}. ` +
+            `Continuing drain; the end-of-run sync update remains authoritative.`
+          );
+        }
       }
 
       if (turnsWritten === 0) {
@@ -629,7 +678,14 @@ export class ConversationsProcessor implements SessionProcessor {
       '[Request interrupted by user'
     ];
 
-    return patterns.some(pattern => text.startsWith(pattern));
+    if (patterns.some(pattern => text.startsWith(pattern))) {
+      return true;
+    }
+
+    // An empty or whitespace-only `<bash-input></bash-input>` wrapper is not
+    // real user input; drop it so it does not emit a bare `!` User entry or
+    // leak raw XML into the conversation log (CR-003).
+    return /^<bash-input>\s*<\/bash-input>\s*$/.test(text);
   }
 
   private isToolResult(msg: any): boolean {
@@ -807,7 +863,9 @@ export class ConversationsProcessor implements SessionProcessor {
     // actually typed so the conversation log matches the terminal (EPMCDME-13675).
     const bashMatch = content.match(/<bash-input>([\s\S]*?)<\/bash-input>/);
     if (bashMatch) {
-      return `!${bashMatch[1].trim()}`;
+      const cmd = bashMatch[1].trim();
+      if (!cmd) return null;
+      return `!${cmd}`;
     }
     return null;
   }
