@@ -30,24 +30,6 @@ import {
 let statuslineManagedThisSession = false;
 
 /**
- * Supported Claude Code version
- * Latest version tested and verified with CodeMie backend
- *
- * **UPDATE THIS WHEN BUMPING CLAUDE VERSION**
- */
-export const CLAUDE_SUPPORTED_VERSION = '2.1.218';
-
-/**
- * Minimum supported Claude Code version
- * Versions below this are known to be incompatible and will be blocked from starting
- * Rule: always 10 patch versions below CLAUDE_SUPPORTED_VERSION
- * e.g. supported = 2.1.218 → minimum = 2.1.208
- *
- * **UPDATE THIS WHEN BUMPING CLAUDE VERSION**
- */
-const CLAUDE_MINIMUM_SUPPORTED_VERSION = '2.1.208';
-
-/**
  * Claude Code installer URLs
  * Official Anthropic installer scripts for native installation
  */
@@ -69,10 +51,6 @@ export const ClaudePluginMetadata: AgentMetadata = {
   cliCommand: 'claude',
 
   sessionAnalyticsReport: true,
-
-  // Version management configuration
-  supportedVersion: CLAUDE_SUPPORTED_VERSION,       // Latest version tested with CodeMie backend
-  minimumSupportedVersion: CLAUDE_MINIMUM_SUPPORTED_VERSION, // Minimum version required to run
 
   // Native installer URLs (used by installNativeAgent utility)
   installerUrls: CLAUDE_INSTALLER_URLS,
@@ -483,12 +461,13 @@ export class ClaudePlugin extends BaseAgentAdapter {
   }
 
   /**
-   * Install specific version of Claude Code
-   * Uses native installer with version parameter
-   * Special handling for version parameter:
-   * - undefined/'latest': Install latest available version
-   * - 'supported': Install version from metadata.supportedVersion
-   * - Semantic version string (e.g., '2.0.30'): Install specific version
+   * Install a specific version of Claude Code via the native installer.
+   *
+   * Special values for the version parameter:
+   * - undefined / 'latest': Install the latest available version.
+   * - 'supported': Silent alias for 'latest' since EPMCDME-13734 removed pinned
+   *                per-agent supported-version constants.
+   * - Semantic version string (e.g., '2.0.30'): Install that specific version.
    *
    * @param version - Version string (e.g., '2.0.30', 'latest', 'supported')
    * @throws {AgentInstallationError} If installation fails
@@ -496,21 +475,10 @@ export class ClaudePlugin extends BaseAgentAdapter {
   async installVersion(version?: string): Promise<string | null> {
     const metadata = this.metadata;
 
-    // Resolve 'supported' to actual version from metadata
-    let resolvedVersion: string | undefined = version;
-    if (version === 'supported') {
-      if (!metadata.supportedVersion) {
-        throw new AgentInstallationError(
-          metadata.name,
-          'No supported version defined in metadata',
-        );
-      }
-      resolvedVersion = metadata.supportedVersion;
-      logger.debug('Resolved version', {
-        from: 'supported',
-        to: resolvedVersion,
-      });
-    }
+    // The legacy 'supported' keyword now aliases to the 'latest' channel —
+    // pinned per-agent supported-version constants were removed in EPMCDME-13734.
+    const resolvedVersion: string | undefined =
+      version === 'supported' ? 'latest' : version;
 
     // SECURITY: Validate version format to prevent command injection
     // Only allow semantic versions (e.g., '2.0.30') or special channels

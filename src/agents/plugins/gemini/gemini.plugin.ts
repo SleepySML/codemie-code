@@ -6,24 +6,6 @@ import type { SessionAdapter } from '../../core/session/BaseSessionAdapter.js';
 import { GeminiExtensionInstaller } from './gemini.extension-installer.js';
 import type { BaseExtensionInstaller } from '../../core/extension/BaseExtensionInstaller.js';
 
-/**
- * Supported Gemini CLI version
- * Latest version tested and verified with CodeMie backend
- *
- * **UPDATE THIS WHEN BUMPING GEMINI VERSION**
- */
-const GEMINI_SUPPORTED_VERSION = '0.29.5';
-
-/**
- * Minimum supported Gemini CLI version
- * Versions below this are known to be incompatible and will be blocked from starting
- * Rule: always 10 patch versions below GEMINI_SUPPORTED_VERSION
- * e.g. supported = 0.29.5 → minimum = 0.29.0 (patch floored at 0 since 5 - 10 < 0)
- *
- * **UPDATE THIS WHEN BUMPING GEMINI VERSION**
- */
-const GEMINI_MINIMUM_SUPPORTED_VERSION = '0.29.0';
-
 // Define metadata first (used by both lifecycle and analytics)
 const metadata = {
   name: 'gemini',
@@ -32,10 +14,6 @@ const metadata = {
 
   npmPackage: '@google/gemini-cli',
   cliCommand: 'gemini',
-
-  // Version management configuration
-  supportedVersion: GEMINI_SUPPORTED_VERSION,            // Latest version tested with CodeMie backend
-  minimumSupportedVersion: GEMINI_MINIMUM_SUPPORTED_VERSION, // Minimum version required to run
 
   envMapping: {
     baseUrl: ['GOOGLE_GEMINI_BASE_URL', 'GEMINI_BASE_URL'],

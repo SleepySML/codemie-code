@@ -65,24 +65,6 @@ import { reconcileStaleCodexSessions } from './codex.reconciliation.js';
 import { mkdir, realpath as fsRealpath } from 'fs/promises';
 
 /**
- * Supported Codex CLI version
- * Latest version tested and verified with CodeMie backend
- *
- * **UPDATE THIS WHEN BUMPING CODEX VERSION**
- */
-const CODEX_SUPPORTED_VERSION = '0.143.0';
-
-/**
- * Minimum supported Codex CLI version
- * Versions below this are known to be incompatible and will be blocked from starting
- * Rule: always 10 minor versions below CODEX_SUPPORTED_VERSION for 0.x Codex releases
- * e.g. supported = 0.143.0 → minimum = 0.133.0
- *
- * **UPDATE THIS WHEN BUMPING CODEX VERSION**
- */
-const CODEX_MINIMUM_SUPPORTED_VERSION = '0.133.0';
-
-/**
  * Build a hook config object from environment variables.
  * Used by both onSessionStart and onSessionEnd lifecycle hooks.
  */
@@ -110,10 +92,6 @@ export const CodexPluginMetadata: AgentMetadata = {
   cliCommand: process.env.CODEMIE_CODEX_BIN || 'codex',
 
   sessionAnalyticsReport: true,
-
-  // Version management configuration
-  supportedVersion: CODEX_SUPPORTED_VERSION,       // Latest version tested with CodeMie backend
-  minimumSupportedVersion: CODEX_MINIMUM_SUPPORTED_VERSION, // Minimum version required to run
 
   dataPaths: {
     home: '.codex', // ~/.codex is fixed for Codex (no XDG convention)

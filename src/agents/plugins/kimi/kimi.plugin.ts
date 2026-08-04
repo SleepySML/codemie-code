@@ -20,8 +20,6 @@ import { sanitizeLogArgs } from '../../../utils/security.js';
 import { commandExists, exec, getCommandPath } from '../../../utils/processes.js';
 import { resolveHomeDir } from '../../../utils/paths.js';
 
-const KIMI_SUPPORTED_VERSION = '0.16.0';
-const KIMI_MINIMUM_SUPPORTED_VERSION = '0.15.0';
 const KIMI_NATIVE_BINARY_PATH = '.kimi-code/bin/kimi';
 
 const KIMI_INSTALLER_URLS = {
@@ -36,8 +34,6 @@ export const KimiPluginMetadata: AgentMetadata = {
   description: 'Kimi Code CLI - Moonshot AI coding agent',
   npmPackage: '@moonshot-ai/kimi-code',
   cliCommand: 'kimi',
-  supportedVersion: KIMI_SUPPORTED_VERSION,
-  minimumSupportedVersion: KIMI_MINIMUM_SUPPORTED_VERSION,
   installerUrls: KIMI_INSTALLER_URLS,
   dataPaths: {
     home: '.kimi-code',
@@ -331,24 +327,17 @@ export class KimiPlugin extends BaseAgentAdapter {
   }
 
   override async installVersion(version?: string): Promise<string | null> {
-    // Resolve 'supported' to the version from metadata
+    // Kimi uses the native installer. The 'supported' keyword now aliases to
+    // 'latest' (EPMCDME-13734), and 'npm' / 'latest' / 'stable' all translate
+    // to "install the latest published build" — which for the native installer
+    // means invoking it without a specific version pin.
     let resolvedVersion: string | undefined = version;
-    if (version === 'supported') {
-      if (!this.metadata.supportedVersion) {
-        throw new AgentInstallationError(
-          this.metadata.name,
-          'No supported version defined in metadata',
-        );
-      }
-      resolvedVersion = this.metadata.supportedVersion;
-      logger.debug('Resolved version', {
-        from: 'supported',
-        to: resolvedVersion,
-      });
-    } else if (version === 'npm' || version === 'latest' || version === 'stable') {
-      // The 'npm', 'latest', and 'stable' channels request the latest build.
-      // Kimi uses the native installer, so passing undefined installs the
-      // latest version.
+    if (
+      version === 'supported' ||
+      version === 'npm' ||
+      version === 'latest' ||
+      version === 'stable'
+    ) {
       resolvedVersion = undefined;
     }
 

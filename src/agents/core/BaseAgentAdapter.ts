@@ -1,8 +1,7 @@
-import { AgentMetadata, AgentAdapter, AgentConfig, MCPConfigSummary, ExtensionsScanSummary, VersionCompatibilityResult, AgentVersionInfo } from './types.js';
+import { AgentMetadata, AgentAdapter, AgentConfig, MCPConfigSummary, ExtensionsScanSummary, AgentVersionInfo } from './types.js';
 import * as npm from '../../utils/processes.js';
-import { NpmError, createErrorContext } from '../../utils/errors.js';
+import { NpmError } from '../../utils/errors.js';
 import { exec, detectGitBranch, detectGitRemoteRepo } from '../../utils/processes.js';
-import { compareVersions } from '../../utils/version-utils.js';
 import { logger } from '../../utils/logger.js';
 import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
@@ -157,30 +156,24 @@ export abstract class BaseAgentAdapter implements AgentAdapter {
   }
 
   /**
-   * Install agent via npm with specific version
-   * Resolves 'supported' to the version from metadata.supportedVersion
+   * Install agent via npm with a specific version.
    *
-   * Override in agent plugins for non-npm installation (e.g., native installers)
+   * The legacy 'supported' channel is retained as a silent alias for 'latest'
+   * (EPMCDME-13734 removed pinned per-agent supported versions). Override in
+   * agent plugins for non-npm installation (e.g., native installers).
    *
-   * @param version - Specific version, 'supported', or undefined for latest
+   * @param version - Specific version, 'latest', 'supported' (alias for 'latest'),
+   *                  or undefined to invoke the plugin's default behavior.
    */
   async installVersion(version?: string): Promise<string | null> {
     if (!this.metadata.npmPackage) {
       throw new Error(`${this.displayName} is built-in and cannot be installed`);
     }
 
-    // Resolve 'supported' to actual version from metadata
-    let resolvedVersion: string | undefined = version;
-    if (version === 'supported') {
-      if (!this.metadata.supportedVersion) {
-        throw new Error(`${this.displayName}: No supported version defined in metadata`);
-      }
-      resolvedVersion = this.metadata.supportedVersion;
-      logger.debug('Resolved version', {
-        from: 'supported',
-        to: resolvedVersion,
-      });
-    }
+    // The legacy 'supported' keyword now aliases to the npm 'latest' dist-tag —
+    // pinned per-agent supported-version constants were removed in EPMCDME-13734.
+    const resolvedVersion: string | undefined =
+      version === 'supported' ? 'latest' : version;
 
     try {
       await npm.installGlobal(this.metadata.npmPackage, { version: resolvedVersion });
@@ -336,117 +329,6 @@ export abstract class BaseAgentAdapter implements AgentAdapter {
       }
     } catch (err) {
       logger.warn('[warnOnceIfUntested] non-fatal error, proceeding', { err: String(err) });
-    }
-  }
-
-  /**
-   * Check if installed version is compatible with CodeMie
-   * Compares installed version against metadata.supportedVersion and
-   * metadata.minimumSupportedVersion. Agents override getVersion() only;
-   * the comparison logic is shared for all agents.
-   *
-   * @returns Version compatibility result with status and version info
-   */
-  async checkVersionCompatibility(): Promise<VersionCompatibilityResult> {
-    const supportedVersion = this.metadata.supportedVersion || 'latest';
-    const minimumSupportedVersion = this.metadata.minimumSupportedVersion;
-
-    const installedVersion = await this.getVersion();
-
-    logger.debug('Checking version compatibility', {
-      agent: this.metadata.name,
-      installedVersion,
-      supportedVersion,
-      minimumSupportedVersion,
-    });
-
-    if (!installedVersion) {
-      return {
-        compatible: false,
-        installedVersion: null,
-        supportedVersion,
-        isNewer: false,
-        hasUpdate: false,
-        isBelowMinimum: false,
-        minimumSupportedVersion,
-      };
-    }
-
-    if (!this.metadata.supportedVersion) {
-      return {
-        compatible: true,
-        installedVersion,
-        supportedVersion: 'latest',
-        isNewer: false,
-        hasUpdate: false,
-        isBelowMinimum: false,
-        minimumSupportedVersion,
-      };
-    }
-
-    try {
-      const comparison = compareVersions(installedVersion, supportedVersion);
-      const hasUpdate = comparison < 0;
-
-      let isBelowMinimum = false;
-      if (minimumSupportedVersion) {
-        const minimumComparison = compareVersions(installedVersion, minimumSupportedVersion);
-        isBelowMinimum = minimumComparison < 0;
-      }
-
-      logger.debug('Version comparison result', {
-        agent: this.metadata.name,
-        comparison,
-        installedVersion,
-        supportedVersion,
-        minimumSupportedVersion,
-        compatible: comparison <= 0,
-        isNewer: comparison > 0,
-        hasUpdate,
-        isBelowMinimum,
-      });
-
-      return {
-        compatible: comparison <= 0,
-        installedVersion,
-        supportedVersion,
-        isNewer: comparison > 0,
-        hasUpdate,
-        isBelowMinimum,
-        minimumSupportedVersion,
-      };
-    } catch (error) {
-      const errorContext = createErrorContext(error, { agent: this.metadata.name });
-      const isParseError =
-        error instanceof Error && error.message.includes('Invalid semantic version');
-
-      if (isParseError) {
-        logger.warn('Non-standard version format detected, treating as incompatible', {
-          ...errorContext,
-          operation: 'checkVersionCompatibility',
-          installedVersion,
-          supportedVersion,
-          minimumSupportedVersion,
-        });
-      } else {
-        logger.error('Version compatibility check failed unexpectedly', {
-          ...errorContext,
-          operation: 'checkVersionCompatibility',
-          installedVersion,
-          supportedVersion,
-          minimumSupportedVersion,
-        });
-      }
-
-      return {
-        compatible: false,
-        installedVersion,
-        supportedVersion,
-        isNewer: false,
-        hasUpdate: false,
-        isBelowMinimum: false,
-        minimumSupportedVersion,
-      };
     }
   }
 
