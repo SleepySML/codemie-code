@@ -206,6 +206,17 @@ export interface VersionCompatibilityResult {
 }
 
 /**
+ * Installed-version snapshot for an agent adapter.
+ *
+ * Superseded shape of the version-check output. CodeMie no longer pins a
+ * "supported version" per agent (see EPMCDME-13734), so the only signal
+ * downstream callers need is the CLI-reported installed version.
+ */
+export interface AgentVersionInfo {
+  installedVersion: string | null;
+}
+
+/**
  * Agent metadata schema - declarative configuration for agents
  */
 export interface AgentMetadata {
