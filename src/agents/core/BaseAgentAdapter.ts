@@ -285,7 +285,16 @@ export abstract class BaseAgentAdapter implements AgentAdapter {
       }
 
       const { getCurrentCliVersion } = await import('../../utils/cli-updater.js');
-      const codemieVersion = (await getCurrentCliVersion()) ?? 'unknown';
+      const codemieVersion = await getCurrentCliVersion();
+      if (!codemieVersion) {
+        // Without a real codemieVersion we cannot build a stable tuple key.
+        // Recording 'unknown' would break the one-time contract on the next
+        // launch where getCurrentCliVersion() succeeds. Skip silently.
+        logger.debug('[warnOnceIfUntested] getCurrentCliVersion returned null; skipping', {
+          agent: this.metadata.name,
+        });
+        return;
+      }
 
       const { VersionWarningStore } = await import('../../utils/version-warnings.js');
       try {

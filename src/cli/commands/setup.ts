@@ -893,8 +893,13 @@ async function checkAndInstallClaude(): Promise<void> {
         console.log(chalk.green(`✓ Claude Code${versionStr} is installed`));
         console.log();
         if (info.installedVersion) {
-          // warnOnceIfUntested is best-effort and never throws.
-          await claude.warnOnceIfUntested();
+          // warnOnceIfUntested is best-effort and never throws, but it does
+          // spawn a second `claude --version` subprocess internally. Guard it
+          // with the same 3-second budget so a stalled binary can't hang setup.
+          await Promise.race([
+            claude.warnOnceIfUntested(),
+            new Promise<void>((resolve) => setTimeout(resolve, 3000)),
+          ]);
         }
       } catch (error) {
         logger.debug('Claude version check skipped during setup', { error });

@@ -73,6 +73,18 @@ describe('AgentsCheck status field', () => {
     expect(result.details[0].message).toContain('Not installed');
   });
 
+  it('renders Untested when VersionWarningStore.hasWarned throws (does not crash doctor)', async () => {
+    const { AgentRegistry } = await import('../../../../../agents/registry.js');
+    const { VersionWarningStore } = await import('../../../../../utils/version-warnings.js');
+    vi.mocked(AgentRegistry.getInstalledAgents).mockResolvedValue([makeAgent({}) as any]);
+    vi.mocked(VersionWarningStore.hasWarned).mockRejectedValue(new Error('EACCES'));
+    const { AgentsCheck } = await import('../AgentsCheck.js');
+    const result = await new AgentsCheck().run();
+    // Must degrade gracefully to Untested, not reject the whole run — CR-003.
+    expect(result.details[0].status).toBe('warn');
+    expect(result.details[0].message).toContain('Untested');
+  });
+
   it('preserves deprecated npm install warning', async () => {
     const { AgentRegistry } = await import('../../../../../agents/registry.js');
     vi.mocked(AgentRegistry.getInstalledAgents).mockResolvedValue([

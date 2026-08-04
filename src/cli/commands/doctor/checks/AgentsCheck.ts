@@ -14,6 +14,7 @@ import { AgentRegistry } from '../../../../agents/registry.js';
 import { AgentAdapter } from '../../../../agents/core/types.js';
 import { VersionWarningStore } from '../../../../utils/version-warnings.js';
 import { getCurrentCliVersion } from '../../../../utils/cli-updater.js';
+import { logger } from '../../../../utils/logger.js';
 import { ItemWiseHealthCheck, HealthCheckResult, HealthCheckDetail } from '../types.js';
 
 export class AgentsCheck implements ItemWiseHealthCheck {
@@ -54,7 +55,17 @@ export class AgentsCheck implements ItemWiseHealthCheck {
       return deprecationWarning;
     }
 
-    const acknowledged = await VersionWarningStore.hasWarned(agent.name, version, codemieVersion);
+    let acknowledged = false;
+    try {
+      acknowledged = await VersionWarningStore.hasWarned(agent.name, version, codemieVersion);
+    } catch (err) {
+      // A store read failure must NEVER crash `codemie doctor` — degrade to
+      // "Untested" so the user still sees the row.
+      logger.warn('[AgentsCheck] VersionWarningStore.hasWarned failed; treating as Untested', {
+        agent: agent.name,
+        err: String(err),
+      });
+    }
     if (acknowledged) {
       return {
         status: 'ok',

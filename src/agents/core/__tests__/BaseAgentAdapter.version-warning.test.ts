@@ -159,6 +159,21 @@ describe('BaseAgentAdapter.warnOnceIfUntested', () => {
     await expect(adapter.warnOnceIfUntested()).resolves.toBeUndefined();
   });
 
+  it('returns early without recording when getCurrentCliVersion returns null', async () => {
+    const { getCurrentCliVersion } = await import('../../../utils/cli-updater.js');
+    vi.mocked(getCurrentCliVersion).mockResolvedValueOnce(null as unknown as string);
+    const { BaseAgentAdapter } = await import('../BaseAgentAdapter.js');
+    const { VersionWarningStore } = await import('../../../utils/version-warnings.js');
+    class Adapter extends BaseAgentAdapter {}
+    const adapter = new Adapter(baseMeta({}));
+    vi.spyOn(adapter as any, 'getVersion').mockResolvedValue('2.1.219');
+    await adapter.warnOnceIfUntested();
+    // Must not store the 'unknown' fallback tuple — it would break the
+    // one-time contract on the next launch (see CR-002).
+    expect(VersionWarningStore.recordWarning).not.toHaveBeenCalled();
+    expect(stderrSpy).not.toHaveBeenCalled();
+  });
+
   it('never throws when VersionWarningStore.recordWarning rejects', async () => {
     const { BaseAgentAdapter } = await import('../BaseAgentAdapter.js');
     const { VersionWarningStore } = await import('../../../utils/version-warnings.js');

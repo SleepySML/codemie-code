@@ -215,27 +215,25 @@ async function promptAgentSelection(outdated: UpdateCheckResult[]): Promise<stri
 async function updateAgent(agent: AgentAdapter, latestVersion: string): Promise<void> {
   // Special handling for Claude (uses native installer)
   if (agent.name === 'claude' && agent.installVersion) {
-    await agent.installVersion('supported');
-    return;
-  }
-
-  // Special handling for built-in agent — update the CLI package
-  if (agent.metadata.isBuiltIn) {
+    await agent.installVersion('latest');
+  } else if (agent.metadata.isBuiltIn) {
+    // Special handling for built-in agent — update the CLI package
     await npm.installGlobal('@codemieai/code', { version: latestVersion, force: true });
-    return;
+  } else {
+    const npmPackage = agent.metadata.npmPackage;
+    if (!npmPackage) {
+      throw new AgentInstallationError(
+        agent.name,
+        `${agent.displayName} cannot be updated (no npm package configured)`,
+      );
+    }
+    // Use force: true to avoid ENOTEMPTY errors when updating global packages
+    await npm.installGlobal(npmPackage, { version: latestVersion, force: true });
   }
 
-  // Standard npm-based agents
-  const npmPackage = agent.metadata.npmPackage;
-  if (!npmPackage) {
-    throw new AgentInstallationError(
-      agent.name,
-      `${agent.displayName} cannot be updated (no npm package configured)`
-    );
-  }
-
-  // Use force: true to avoid ENOTEMPTY errors when updating global packages
-  await npm.installGlobal(npmPackage, { version: latestVersion, force: true });
+  // Record the one-time untested-version marker for the freshly-installed CLI
+  // so the first subsequent launch doesn't re-warn — see EPMCDME-13734.
+  await agent.warnOnceIfUntested();
 }
 
 export function createUpdateCommand(): Command {
@@ -291,7 +289,7 @@ export function createUpdateCommand(): Command {
           if (!result.hasUpdate) {
             // For Claude, clarify it's the latest supported version (not absolute latest)
             if (agent.name === 'claude') {
-              spinner.succeed(`${agent.displayName} is already up to date with latest verified version by CodeMie (${result.currentVersion})`);
+              spinner.succeed(`${agent.displayName} is already up to date (${result.currentVersion})`);
             } else {
               spinner.succeed(`${agent.displayName} is already up to date (${result.currentVersion})`);
             }

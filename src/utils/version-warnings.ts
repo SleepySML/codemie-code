@@ -105,9 +105,9 @@ export class VersionWarningStore {
 
   static async clear(): Promise<{ removed: number }> {
     const file = filePath();
+    const history = await this.loadHistory();
+    const removed = history.warnings.length;
     try {
-      const history = await this.loadHistory();
-      const removed = history.warnings.length;
       await fs.unlink(file);
       return { removed };
     } catch (err) {
@@ -115,7 +115,14 @@ export class VersionWarningStore {
       if (code === 'ENOENT') {
         return { removed: 0 };
       }
-      throw err;
+      // Soft-fail on non-transient errors (EACCES, EROFS, EPERM). The user
+      // ran the reset intentionally — crashing `codemie doctor` here would be
+      // strictly worse than reporting "0 removed" and continuing the checks.
+      logger.warn('[VersionWarningStore] clear() failed; markers left in place', {
+        file,
+        code,
+      });
+      return { removed: 0 };
     }
   }
 }
