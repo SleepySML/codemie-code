@@ -836,8 +836,24 @@ export interface AgentAdapter {
   /**
    * Check version compatibility (optional, for version-managed agents)
    * @returns Version compatibility result
+   * @deprecated Superseded by `getVersionInfo()` / `warnOnceIfUntested()`.
+   *             Removed together with the pinned per-agent supported-version
+   *             constants — see EPMCDME-13734.
    */
   checkVersionCompatibility?(): Promise<VersionCompatibilityResult>;
+
+  /**
+   * Return the installed-version snapshot for this adapter.
+   * Replaces the compatibility-oriented output of `checkVersionCompatibility()`.
+   */
+  getVersionInfo(): Promise<AgentVersionInfo>;
+
+  /**
+   * Emit a one-time "untested version" notice for the current
+   * (agent, agent-version, codemie-version) tuple and record the marker so
+   * future launches stay silent. Never throws, never blocks.
+   */
+  warnOnceIfUntested(): Promise<void>;
 
   /**
    * Detect installation method (optional, for installation-aware agents)

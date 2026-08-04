@@ -54,26 +54,32 @@ async function checkAgentForUpdate(agent: AgentAdapter): Promise<UpdateCheckResu
     return null;
   }
 
-  // Special handling for Claude (uses native installer, not npm)
-  if (agent.name === 'claude' && agent.checkVersionCompatibility) {
-    const compat = await agent.checkVersionCompatibility();
-    const supportedVersion = compat.supportedVersion;
+  // Special handling for Claude (uses native installer, not npm-global). The npm
+  // registry entry for @anthropic-ai/claude-code still tracks the latest published
+  // version, so we query it directly instead of the removed metadata.supportedVersion.
+  if (agent.name === 'claude') {
     const cleanCurrentVersion = extractVersion(currentVersion) || currentVersion;
+    const latestVersion = await npm.getLatestVersion('@anthropic-ai/claude-code');
+    if (!latestVersion) return null;
 
-    // Validate versions before comparing
-    const cleanSupported = extractVersion(supportedVersion);
-    if (!cleanSupported) return null;
+    const cleanLatestVersion = extractVersion(latestVersion) || latestVersion;
+    if (!isValidSemanticVersion(cleanCurrentVersion) || !isValidSemanticVersion(cleanLatestVersion)) {
+      logger.debug('Invalid version format for claude, skipping update check', {
+        cleanCurrentVersion,
+        cleanLatestVersion,
+      });
+      return null;
+    }
 
-    // Check if update available (current < supported)
-    const hasUpdate = compareVersions(cleanCurrentVersion, cleanSupported) < 0;
+    const hasUpdate = compareVersions(cleanCurrentVersion, cleanLatestVersion) < 0;
 
     return {
       name: agent.name,
       displayName: agent.displayName,
       currentVersion: cleanCurrentVersion,
-      latestVersion: cleanSupported,
+      latestVersion: cleanLatestVersion,
       hasUpdate,
-      npmPackage: '@anthropic-ai/claude-code' // Keep for compatibility, won't be used
+      npmPackage: '@anthropic-ai/claude-code',
     };
   }
 
