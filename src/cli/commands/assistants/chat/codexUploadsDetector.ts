@@ -132,64 +132,58 @@ function processImageBlock(block: CodexContentBlock, fileName: string): Detected
 
   const prefix = block.image_url.slice(0, commaIdx);
   const base64Data = block.image_url.slice(commaIdx + 1);
+
+  if (!base64Data) {
+    logger.warn(`${LOG_PREFIX} Empty data URI payload in input_image block`, { fileName });
+    return null;
+  }
+
   const mimeMatch = /data:([^;]+);base64/.exec(prefix);
   const mediaType = mimeMatch?.[1] ?? DEFAULT_MEDIA_TYPE;
 
-  try {
-    const fileSize = Buffer.from(base64Data, 'base64').length;
-    if (fileSize > MAX_FILE_SIZE_BYTES) {
-      logger.warn(`${LOG_PREFIX} File exceeds size limit, skipping`, {
-        fileName,
-        sizeMB: (fileSize / BYTES_PER_MB).toFixed(2),
-        limit: MAX_FILE_SIZE_MB,
-      });
-      return null;
-    }
+  // Estimate decoded size without allocating the full buffer (Buffer.from on a large
+  // payload can OOM before the size guard runs, silently dropping a valid attachment).
+  const paddingChars = base64Data.endsWith('==') ? 2 : base64Data.endsWith('=') ? 1 : 0;
+  const sizeBytes = Math.ceil(base64Data.length * 3 / 4) - paddingChars;
 
-    return {
+  if (sizeBytes > MAX_FILE_SIZE_BYTES) {
+    logger.warn(`${LOG_PREFIX} File exceeds size limit, skipping`, {
       fileName,
-      data: base64Data,
-      mediaType,
-      type: 'image',
-      sizeBytes: fileSize,
-    };
-  } catch (error) {
-    logger.warn(`${LOG_PREFIX} Invalid base64 data`, { fileName, error });
+      sizeMB: (sizeBytes / BYTES_PER_MB).toFixed(2),
+      limit: MAX_FILE_SIZE_MB,
+    });
     return null;
   }
+
+  return {
+    fileName,
+    data: base64Data,
+    mediaType,
+    type: 'image',
+    sizeBytes,
+  };
 }
 
 function extractAttachments(records: CodexRolloutRecord[]): DetectedFile[] {
   let targetResponseItem: CodexResponseItemMessage | null = null;
   let targetEventMsg: (CodexEventMsg & { local_images?: string[] }) | null = null;
 
+  // First pass: locate the most-recent user response_item that carries attachments.
+  let responseItemIndex = -1;
   for (let i = records.length - 1; i >= 0; i--) {
     const record = records[i];
-
-    if (!targetResponseItem && record.type === 'response_item') {
-      const payload = record.payload as unknown as CodexResponseItemMessage;
-      if (
-        payload.type === 'message' &&
-        payload.role === 'user' &&
-        Array.isArray(payload.content) &&
-        payload.content.some((b) => b.type === 'input_image' || b.type === 'input_file')
-      ) {
-        targetResponseItem = payload;
-      }
+    if (record.type !== 'response_item') continue;
+    const payload = record.payload as unknown as CodexResponseItemMessage;
+    if (
+      payload.type === 'message' &&
+      payload.role === 'user' &&
+      Array.isArray(payload.content) &&
+      payload.content.some((b) => b.type === 'input_image' || b.type === 'input_file')
+    ) {
+      targetResponseItem = payload;
+      responseItemIndex = i;
+      break;
     }
-
-    if (!targetEventMsg && record.type === 'event_msg') {
-      const payload = record.payload as CodexEventMsg & { local_images?: string[] };
-      if (
-        payload.type === 'user_message' &&
-        typeof payload.message === 'string' &&
-        !isCodexInjectedUserText(payload.message)
-      ) {
-        targetEventMsg = payload;
-      }
-    }
-
-    if (targetResponseItem && targetEventMsg) break;
   }
 
   if (!targetResponseItem) {
@@ -197,33 +191,52 @@ function extractAttachments(records: CodexRolloutRecord[]): DetectedFile[] {
     return [];
   }
 
+  // Second pass: find the matching event_msg at or before the response_item's position,
+  // so a later follow-up message never severs the filename chain.
+  for (let i = responseItemIndex; i >= 0; i--) {
+    const record = records[i];
+    if (record.type !== 'event_msg') continue;
+    const payload = record.payload as CodexEventMsg & { local_images?: string[] };
+    if (
+      payload.type === 'user_message' &&
+      typeof payload.message === 'string' &&
+      !isCodexInjectedUserText(payload.message)
+    ) {
+      targetEventMsg = payload;
+      break;
+    }
+  }
+
   const detectedFiles: DetectedFile[] = [];
   const content = targetResponseItem.content;
-  let localImageIndex = 0;
+  // imageOnlyIndex tracks position within local_images (images-only array) separately
+  // from input_file blocks, which do not appear in local_images.
+  let imageOnlyIndex = 0;
 
   for (let i = 0; i < content.length; i++) {
     const block = content[i];
     if (block.type !== 'input_image' && block.type !== 'input_file') continue;
 
-    let fileName: string | undefined;
-    if (i > 0) {
-      const prev = content[i - 1];
-      if (prev.type === 'input_text' && typeof prev.text === 'string') {
-        const match = IMAGE_WRAPPER_PATTERN.exec(prev.text);
-        if (match) fileName = basename(match[1]);
-      }
-    }
-    if (!fileName) {
-      const localPath = targetEventMsg?.local_images?.[localImageIndex];
-      if (localPath) fileName = basename(localPath);
-    }
-    fileName = fileName ?? `attachment_${localImageIndex}`;
-    localImageIndex++;
-
     if (block.type === 'input_image') {
+      let fileName: string | undefined;
+      if (i > 0) {
+        const prev = content[i - 1];
+        if (prev.type === 'input_text' && typeof prev.text === 'string') {
+          const match = IMAGE_WRAPPER_PATTERN.exec(prev.text);
+          if (match) fileName = basename(match[1]);
+        }
+      }
+      if (!fileName) {
+        const localPath = targetEventMsg?.local_images?.[imageOnlyIndex];
+        if (localPath) fileName = basename(localPath);
+      }
+      fileName = fileName ?? `attachment_${imageOnlyIndex}`;
+      imageOnlyIndex++;
+
       const detectedFile = processImageBlock(block, fileName);
       if (detectedFile) detectedFiles.push(detectedFile);
     }
+    // input_file blocks are not yet uploadable (no non-image upload path); skip silently.
   }
 
   logger.debug(`${LOG_PREFIX} Extracted attachments`, { count: detectedFiles.length });
