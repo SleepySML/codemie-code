@@ -1,11 +1,15 @@
 /**
  * VersionWarningStore
  *
- * Records one-time "untested version" markers per (agent, agent-version, codemie-version)
- * tuple at user scope. Backing file: `~/.codemie/version-warnings.json`.
+ * Records one-time "untested version" markers per (agent, agent-version)
+ * pair at user scope. Backing file: `~/.codemie/version-warnings.json`.
  *
- * Rationale: CodeMie no longer pins per-agent supported-version constants. Instead of
- * blocking on version mismatch, the CLI warns once per unique tuple and proceeds.
+ * Rationale: CodeMie no longer pins per-agent supported-version constants.
+ * Instead of blocking on version mismatch, the CLI warns once per unique
+ * (agent, agent-version) pair and proceeds. The running CodeMie version is
+ * NOT part of the marker key — a CodeMie release must not re-nag users about
+ * an agent version they have already acknowledged.
+ *
  * See EPMCDME-13734 and docs/superpowers/tasks/2026-08-04-untested-agent-version-warning-non-blocking/spec.md.
  */
 
@@ -17,7 +21,6 @@ import { getCodemiePath } from './paths.js';
 export interface VersionWarningRecord {
   agentName: string;
   agentVersion: string;
-  codemieVersion: string;
   warnedAt: string;
 }
 
@@ -65,31 +68,17 @@ export class VersionWarningStore {
     await fs.writeFile(file, JSON.stringify(history, null, 2), 'utf-8');
   }
 
-  static async hasWarned(
-    agentName: string,
-    agentVersion: string,
-    codemieVersion: string,
-  ): Promise<boolean> {
+  static async hasWarned(agentName: string, agentVersion: string): Promise<boolean> {
     const history = await this.loadHistory();
     return history.warnings.some(
-      (w) =>
-        w.agentName === agentName &&
-        w.agentVersion === agentVersion &&
-        w.codemieVersion === codemieVersion,
+      (w) => w.agentName === agentName && w.agentVersion === agentVersion,
     );
   }
 
-  static async recordWarning(
-    agentName: string,
-    agentVersion: string,
-    codemieVersion: string,
-  ): Promise<void> {
+  static async recordWarning(agentName: string, agentVersion: string): Promise<void> {
     const history = await this.loadHistory();
     const exists = history.warnings.some(
-      (w) =>
-        w.agentName === agentName &&
-        w.agentVersion === agentVersion &&
-        w.codemieVersion === codemieVersion,
+      (w) => w.agentName === agentName && w.agentVersion === agentVersion,
     );
     if (exists) {
       return;
@@ -97,7 +86,6 @@ export class VersionWarningStore {
     history.warnings.push({
       agentName,
       agentVersion,
-      codemieVersion,
       warnedAt: new Date().toISOString(),
     });
     await this.saveHistory(history);

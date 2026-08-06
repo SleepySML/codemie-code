@@ -2,12 +2,12 @@
 
 ## Summary
 
-Replace the blocking agent-version checks in CodeMie CLI with a **one-time, non-blocking "untested version" warning**. Warn once per `(agent, agent-version, codemie-version)` tuple, at user scope, then stay silent forever until the tuple changes or the user resets the markers. Version mismatches never block execution and never throw in non-interactive contexts. All pinned per-agent supported-version constants disappear from the codebase; agent CLIs can release independently without a CodeMie release to keep users unblocked.
+Replace the blocking agent-version checks in CodeMie CLI with a **one-time, non-blocking "untested version" warning**. Warn once per `(agent, agent-version)` pair, at user scope, then stay silent forever until the agent version changes or the user resets the markers. The running CodeMie version is displayed in the notice for context but is deliberately **not** part of the marker key — a CodeMie release must not re-nag users about an agent version they have already acknowledged. Version mismatches never block execution and never throw in non-interactive contexts. All pinned per-agent supported-version constants disappear from the codebase; agent CLIs can release independently without a CodeMie release to keep users unblocked.
 
 ## Goals
 
 - User is never prevented from launching a wrapped agent by a version check.
-- User is never nagged more than once per unique `(agent, agent-version, codemie-version)` tuple.
+- User is never nagged more than once per unique `(agent, agent-version)` pair — CodeMie releases do not reset acknowledgements.
 - CodeMie no longer ships pinned per-agent supported-version constants; no CodeMie release is required to acknowledge a new agent CLI release.
 - Non-interactive contexts (ACP, silent, non-TTY, CI, scripted) log a warning and proceed automatically — they never throw or `inquirer.prompt`.
 - `codemie doctor` surfaces per-agent verification status so users can see, at a glance, which agent versions have already been acknowledged.
@@ -38,10 +38,10 @@ $ codemie claude
 
 - Written with `chalk.yellow` for the header and plain white for the guidance lines.
 - Emitted to stderr (so `codemie claude --print ... | jq` still works).
-- Marker `{agentName: "claude", agentVersion: "2.1.219", codemieVersion: "0.11.0"}` is recorded to `~/.codemie/version-warnings.json` **after** the warning is printed.
+- Marker `{agentName: "claude", agentVersion: "2.1.219"}` is recorded to `~/.codemie/version-warnings.json` **after** the warning is printed. The running CodeMie version appears in the banner text but is **not** stored in the marker.
 - Agent launches immediately after the marker is persisted.
 
-### 2. Repeat launch with an already-acknowledged tuple
+### 2. Repeat launch with an already-acknowledged pair
 
 ```
 $ codemie claude
@@ -75,8 +75,8 @@ Three states:
 
 | State | When | Rendering |
 |---|---|---|
-| **Acknowledged** | A marker exists for `(agent, installed-version, codemie-version)` | `chalk.green('Acknowledged')` |
-| **Untested** | Agent is installed but no marker exists for the current tuple | `chalk.yellow('Untested')` |
+| **Acknowledged** | A marker exists for `(agent, installed-version)` | `chalk.green('Acknowledged')` |
+| **Untested** | Agent is installed but no marker exists for the current `(agent, installed-version)` pair | `chalk.yellow('Untested')` |
 | **Not installed** | `agent.getVersion()` returned `null` | `chalk.gray('Not installed')` |
 
 Deprecation warning for legacy npm-global installs (existing behavior) is preserved and appended as a secondary line.
@@ -100,7 +100,7 @@ Cleared version-warnings.json — 3 markers removed.
 | **Plugin metadata** (`src/agents/plugins/*/*.plugin.ts`) | Remove `*_SUPPORTED_VERSION`, `*_MINIMUM_SUPPORTED_VERSION` constants (8 total across 4 plugins). Remove `supportedVersion`, `minimumSupportedVersion` fields from every plugin's metadata literal. |
 | **Types** (`src/agents/core/types.ts`) | Remove `supportedVersion`, `minimumSupportedVersion` optional fields from `AgentMetadata`. Replace `VersionCompatibilityResult` with narrower `AgentVersionInfo { installedVersion: string \| null }`. |
 | **Adapter core** (`src/agents/core/BaseAgentAdapter.ts`) | Replace `checkVersionCompatibility()` returning `VersionCompatibilityResult` with a simpler `getVersionInfo()` returning `AgentVersionInfo`. Rewrite the version-check block inside `run()` (lines 383–506) as a call to a new helper `warnOnceIfUntested()` that consults `VersionWarningStore`. Remove every `inquirer.prompt` in this block. Remove the `throw` in `silentMode` branch. Never call `process.exit()` in this block. |
-| **State** (new: `src/utils/version-warnings.ts`) | `VersionWarningStore` class following the `MigrationTracker` shape. File: `~/.codemie/version-warnings.json`. Methods: `hasWarned(agent, agentVersion, codemieVersion)`, `recordWarning(agent, agentVersion, codemieVersion)`, `clear()`. |
+| **State** (new: `src/utils/version-warnings.ts`) | `VersionWarningStore` class following the `MigrationTracker` shape. File: `~/.codemie/version-warnings.json`. Methods: `hasWarned(agent, agentVersion)`, `recordWarning(agent, agentVersion)`, `clear()`. The running CodeMie version is **not** part of the key — see rationale in the Summary. |
 | **CLI — install** (`src/cli/commands/install.ts`) | Route `--supported` and default-`'supported'` values to `'latest'`. Remove references to `compat.supportedVersion` in display strings (there is no supported version). Continue emitting the one-time-warning through the same shared helper. |
 | **CLI — update** (`src/cli/commands/update.ts`) | Stop calling `checkVersionCompatibility()` for its return shape. Use `getVersionInfo()` for installed version display only. Emit one-time-warning via the same shared helper. Do not gate the update on version comparison. |
 | **CLI — setup** (`src/cli/commands/setup.ts`) | Replace the `chalk.yellow(...isNewer...) / chalk.green(...compatible...)` block with the shared helper. Preserve the 3-second timeout wrapper for `getVersion()`. |
@@ -116,12 +116,13 @@ Cleared version-warnings.json — 3 markers removed.
 - Behavior:
   1. Call `this.getVersionInfo()`.
   2. If `installedVersion` is `null`, return without warning (no version → nothing to warn about; the install/setup command surfaces this separately).
-  3. Read `codemieVersion` from `getCurrentVersion()` in `src/utils/cli-updater.ts`.
-  4. If `VersionWarningStore.hasWarned(agentName, installedVersion, codemieVersion)`, return.
-  5. Otherwise:
+  3. If `VersionWarningStore.hasWarned(agentName, installedVersion)`, return.
+  4. Otherwise:
+     - Read `codemieVersion` from `getCurrentCliVersion()` in `src/utils/cli-updater.ts` for the display line only (fall back to `"unknown"` when null).
      - Emit the "untested version" notice: `logger.warn(...)` always; if `!metadata.silentMode && isInteractive()`, also print the chalk-formatted banner to `console.error`.
-     - Call `VersionWarningStore.recordWarning(...)`.
+     - Call `VersionWarningStore.recordWarning(agentName, installedVersion)`.
 - Never throws. Never blocks. Never prompts.
+- The running CodeMie version appears in the banner text but does **not** participate in the marker lookup — see Summary rationale.
 
 `isInteractive()` is a shared utility function evaluating `process.stdin.isTTY === true && process.env.CODEMIE_NO_PROMPTS !== '1'`. It lives with `sanitizeLogArgs` in `src/utils/logger-helpers.ts` or a new `src/utils/tty.ts` — plan decides.
 
@@ -136,7 +137,6 @@ Cleared version-warnings.json — 3 markers removed.
     {
       "agentName": "claude",
       "agentVersion": "2.1.219",
-      "codemieVersion": "0.11.0",
       "warnedAt": "2026-08-04T12:00:00.000Z"
     }
   ]

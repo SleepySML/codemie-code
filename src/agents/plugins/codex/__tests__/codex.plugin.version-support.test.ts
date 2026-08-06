@@ -83,7 +83,7 @@ describe('CodexPlugin — one-time untested-version warning contract', () => {
 
     await adapter.warnOnceIfUntested();
 
-    expect(VersionWarningStore.recordWarning).toHaveBeenCalledWith('codex', '0.143.0', '0.11.0');
+    expect(VersionWarningStore.recordWarning).toHaveBeenCalledWith('codex', '0.143.0');
   });
 
   it('warnOnceIfUntested is silent and does not record when marker is present', async () => {

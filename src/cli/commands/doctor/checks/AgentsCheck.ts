@@ -57,7 +57,7 @@ export class AgentsCheck implements ItemWiseHealthCheck {
 
     let acknowledged = false;
     try {
-      acknowledged = await VersionWarningStore.hasWarned(agent.name, version, codemieVersion);
+      acknowledged = await VersionWarningStore.hasWarned(agent.name, version);
     } catch (err) {
       // A store read failure must NEVER crash `codemie doctor` — degrade to
       // "Untested" so the user still sees the row.

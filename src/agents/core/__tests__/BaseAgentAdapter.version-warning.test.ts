@@ -111,7 +111,7 @@ describe('BaseAgentAdapter.warnOnceIfUntested', () => {
     const adapter = new Adapter(baseMeta({}));
     vi.spyOn(adapter as any, 'getVersion').mockResolvedValue('2.1.219');
     await adapter.warnOnceIfUntested();
-    expect(VersionWarningStore.recordWarning).toHaveBeenCalledWith('claude', '2.1.219', '0.11.0');
+    expect(VersionWarningStore.recordWarning).toHaveBeenCalledWith('claude', '2.1.219');
     expect(stderrSpy).toHaveBeenCalled();
     const anyCallHasHeader = stderrSpy.mock.calls.some((call) =>
       typeof call[0] === 'string' && (call[0] as string).includes('CodeMie has not yet been tested'),
@@ -130,7 +130,7 @@ describe('BaseAgentAdapter.warnOnceIfUntested', () => {
     await adapter.warnOnceIfUntested();
     expect(logger.warn).toHaveBeenCalled();
     expect(stderrSpy).not.toHaveBeenCalled();
-    expect(VersionWarningStore.recordWarning).toHaveBeenCalledWith('claude', '2.1.219', '0.11.0');
+    expect(VersionWarningStore.recordWarning).toHaveBeenCalledWith('claude', '2.1.219');
   });
 
   it('logs warn only (no stderr banner) when non-interactive TTY', async () => {
@@ -159,19 +159,27 @@ describe('BaseAgentAdapter.warnOnceIfUntested', () => {
     await expect(adapter.warnOnceIfUntested()).resolves.toBeUndefined();
   });
 
-  it('returns early without recording when getCurrentCliVersion returns null', async () => {
+  it('still records marker when getCurrentCliVersion returns null (2-tuple key)', async () => {
+    // codemieVersion is used only for the display line in the banner — it is
+    // NOT part of the marker key. When getCurrentCliVersion returns null we
+    // still fire the notice and record the (agent, agent-version) pair.
+    const { isInteractive } = await import('../../../utils/tty.js');
+    vi.mocked(isInteractive).mockReturnValue(true);
     const { getCurrentCliVersion } = await import('../../../utils/cli-updater.js');
     vi.mocked(getCurrentCliVersion).mockResolvedValueOnce(null as unknown as string);
     const { BaseAgentAdapter } = await import('../BaseAgentAdapter.js');
     const { VersionWarningStore } = await import('../../../utils/version-warnings.js');
+    vi.mocked(VersionWarningStore.hasWarned).mockResolvedValue(false);
     class Adapter extends BaseAgentAdapter {}
     const adapter = new Adapter(baseMeta({}));
     vi.spyOn(adapter as any, 'getVersion').mockResolvedValue('2.1.219');
     await adapter.warnOnceIfUntested();
-    // Must not store the 'unknown' fallback tuple — it would break the
-    // one-time contract on the next launch (see CR-002).
-    expect(VersionWarningStore.recordWarning).not.toHaveBeenCalled();
-    expect(stderrSpy).not.toHaveBeenCalled();
+    expect(VersionWarningStore.recordWarning).toHaveBeenCalledWith('claude', '2.1.219');
+    // Banner still fires — the display line falls back to "unknown" for the
+    // running CodeMie version so the user is still notified.
+    expect(stderrSpy).toHaveBeenCalled();
+    const bannerText = stderrSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(bannerText).toContain('unknown');
   });
 
   it('never throws when VersionWarningStore.recordWarning rejects', async () => {

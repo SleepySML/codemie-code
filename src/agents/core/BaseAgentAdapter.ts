@@ -266,8 +266,8 @@ export abstract class BaseAgentAdapter implements AgentAdapter {
   }
 
   /**
-   * Emit a one-time "untested version" notice per (agent, agent-version, codemie-version)
-   * tuple and record the marker so future launches stay silent.
+   * Emit a one-time "untested version" notice per (agent, agent-version)
+   * pair and record the marker so future launches stay silent.
    *
    * Contract:
    *  - Never throws. All failures are swallowed and logged; version-check must
@@ -276,6 +276,9 @@ export abstract class BaseAgentAdapter implements AgentAdapter {
    *  - Non-interactive / silentMode / non-TTY: `logger.warn()` only, no stderr banner.
    *  - Interactive TTY + non-silent: chalk banner to stderr AND `logger.warn()`.
    *  - No-op when `getVersion()` returns null (nothing to warn about).
+   *  - Running CodeMie version is displayed in the notice for context but is
+   *    NOT part of the marker key — a CodeMie release must not re-nag users
+   *    about an agent version they have already acknowledged (EPMCDME-13734).
    */
   async warnOnceIfUntested(): Promise<void> {
     try {
@@ -284,21 +287,9 @@ export abstract class BaseAgentAdapter implements AgentAdapter {
         return;
       }
 
-      const { getCurrentCliVersion } = await import('../../utils/cli-updater.js');
-      const codemieVersion = await getCurrentCliVersion();
-      if (!codemieVersion) {
-        // Without a real codemieVersion we cannot build a stable tuple key.
-        // Recording 'unknown' would break the one-time contract on the next
-        // launch where getCurrentCliVersion() succeeds. Skip silently.
-        logger.debug('[warnOnceIfUntested] getCurrentCliVersion returned null; skipping', {
-          agent: this.metadata.name,
-        });
-        return;
-      }
-
       const { VersionWarningStore } = await import('../../utils/version-warnings.js');
       try {
-        if (await VersionWarningStore.hasWarned(this.metadata.name, installedVersion, codemieVersion)) {
+        if (await VersionWarningStore.hasWarned(this.metadata.name, installedVersion)) {
           return;
         }
       } catch (err) {
@@ -307,6 +298,9 @@ export abstract class BaseAgentAdapter implements AgentAdapter {
           err: String(err),
         });
       }
+
+      const { getCurrentCliVersion } = await import('../../utils/cli-updater.js');
+      const codemieVersion = (await getCurrentCliVersion()) ?? 'unknown';
 
       const { isInteractive } = await import('../../utils/tty.js');
       const isSilent = this.metadata.silentMode === true;
@@ -329,7 +323,7 @@ export abstract class BaseAgentAdapter implements AgentAdapter {
       }
 
       try {
-        await VersionWarningStore.recordWarning(this.metadata.name, installedVersion, codemieVersion);
+        await VersionWarningStore.recordWarning(this.metadata.name, installedVersion);
       } catch (err) {
         logger.warn('[warnOnceIfUntested] recordWarning failed, marker will re-emit next launch', {
           agent: this.metadata.name,
