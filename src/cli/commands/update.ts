@@ -287,12 +287,7 @@ export function createUpdateCommand(): Command {
           }
 
           if (!result.hasUpdate) {
-            // For Claude, clarify it's the latest supported version (not absolute latest)
-            if (agent.name === 'claude') {
-              spinner.succeed(`${agent.displayName} is already up to date (${result.currentVersion})`);
-            } else {
-              spinner.succeed(`${agent.displayName} is already up to date (${result.currentVersion})`);
-            }
+            spinner.succeed(`${agent.displayName} is already up to date (${result.currentVersion})`);
             return;
           }
 

@@ -208,8 +208,8 @@ export function createInstallCommand(): Command {
 
             // One-time untested-version notice for the freshly-installed CLI.
             // No-op if the tuple has already been acknowledged in a prior session.
-            if (displayVersion && 'warnOnceIfUntested' in agent) {
-              await (agent as unknown as { warnOnceIfUntested: () => Promise<void> }).warnOnceIfUntested();
+            if (displayVersion) {
+              await agent.warnOnceIfUntested();
             }
 
             // Show how to run the newly installed agent
