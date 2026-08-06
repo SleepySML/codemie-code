@@ -42,7 +42,7 @@ describe('KimiPlugin', () => {
   });
 
   describe('installVersion', () => {
-    it('installs supported version natively (alias for latest since EPMCDME-13734)', async () => {
+    it('installs supported version natively', async () => {
       const plugin = new KimiPlugin();
 
       await expect(plugin.installVersion('supported')).resolves.toBe('1.0.0');
@@ -52,7 +52,7 @@ describe('KimiPlugin', () => {
       expect(installNativeAgent).toHaveBeenCalledWith(
         'kimi',
         KimiPluginMetadata.installerUrls,
-        undefined,
+        '0.16.0',
         expect.any(Object),
       );
     });

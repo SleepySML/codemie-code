@@ -65,6 +65,25 @@ import { reconcileStaleCodexSessions } from './codex.reconciliation.js';
 import { mkdir, realpath as fsRealpath } from 'fs/promises';
 
 /**
+ * Supported Codex CLI version
+ * Latest version tested and verified with CodeMie backend.
+ * Bump this when a new codex release has been validated with CodeMie.
+ *
+ * **UPDATE THIS WHEN BUMPING CODEX VERSION**
+ */
+const CODEX_SUPPORTED_VERSION = '0.143.0';
+
+/**
+ * Minimum supported Codex CLI version
+ * Reference for the oldest version CodeMie has verified against.
+ * Never blocks — the version-check is non-blocking (EPMCDME-13734); the value is
+ * kept as documentation for CodeMie team + display.
+ *
+ * **UPDATE THIS WHEN BUMPING CODEX VERSION**
+ */
+const CODEX_MINIMUM_SUPPORTED_VERSION = '0.133.0';
+
+/**
  * Build a hook config object from environment variables.
  * Used by both onSessionStart and onSessionEnd lifecycle hooks.
  */
@@ -92,6 +111,12 @@ export const CodexPluginMetadata: AgentMetadata = {
   cliCommand: process.env.CODEMIE_CODEX_BIN || 'codex',
 
   sessionAnalyticsReport: true,
+
+  // Version management configuration — reference points for the non-blocking
+  // one-time untested-version notice (EPMCDME-13734). Bumped manually per
+  // CodeMie release as new codex versions are validated.
+  supportedVersion: CODEX_SUPPORTED_VERSION,
+  minimumSupportedVersion: CODEX_MINIMUM_SUPPORTED_VERSION,
 
   dataPaths: {
     home: '.codex', // ~/.codex is fixed for Codex (no XDG convention)

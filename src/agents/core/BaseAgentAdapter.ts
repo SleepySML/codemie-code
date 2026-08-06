@@ -1,7 +1,8 @@
-import { AgentMetadata, AgentAdapter, AgentConfig, MCPConfigSummary, ExtensionsScanSummary, AgentVersionInfo } from './types.js';
+import { AgentMetadata, AgentAdapter, AgentConfig, MCPConfigSummary, ExtensionsScanSummary, AgentVersionInfo, VersionCompatibilityResult } from './types.js';
 import * as npm from '../../utils/processes.js';
-import { NpmError } from '../../utils/errors.js';
+import { NpmError, createErrorContext } from '../../utils/errors.js';
 import { exec, detectGitBranch, detectGitRemoteRepo } from '../../utils/processes.js';
+import { compareVersions } from '../../utils/version-utils.js';
 import { logger } from '../../utils/logger.js';
 import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
@@ -162,18 +163,23 @@ export abstract class BaseAgentAdapter implements AgentAdapter {
    * (EPMCDME-13734 removed pinned per-agent supported versions). Override in
    * agent plugins for non-npm installation (e.g., native installers).
    *
-   * @param version - Specific version, 'latest', 'supported' (alias for 'latest'),
-   *                  or undefined to invoke the plugin's default behavior.
+   * @param version - Specific version, 'latest', 'supported' (resolves to
+   *                  `metadata.supportedVersion`), or undefined for latest.
    */
   async installVersion(version?: string): Promise<string | null> {
     if (!this.metadata.npmPackage) {
       throw new Error(`${this.displayName} is built-in and cannot be installed`);
     }
 
-    // The legacy 'supported' keyword now aliases to the npm 'latest' dist-tag —
-    // pinned per-agent supported-version constants were removed in EPMCDME-13734.
-    const resolvedVersion: string | undefined =
-      version === 'supported' ? 'latest' : version;
+    // Resolve the 'supported' channel to the pinned constant from metadata.
+    let resolvedVersion: string | undefined = version;
+    if (version === 'supported') {
+      if (!this.metadata.supportedVersion) {
+        throw new Error(`${this.displayName}: No supported version defined in metadata`);
+      }
+      resolvedVersion = this.metadata.supportedVersion;
+      logger.debug('Resolved version', { from: 'supported', to: resolvedVersion });
+    }
 
     try {
       await npm.installGlobal(this.metadata.npmPackage, { version: resolvedVersion });
@@ -256,9 +262,8 @@ export abstract class BaseAgentAdapter implements AgentAdapter {
   /**
    * Return the installed-version snapshot for this agent.
    *
-   * Callers previously relied on `checkVersionCompatibility()`. The comparison
-   * fields have no meaning now that CodeMie no longer pins a supported version;
-   * the only thing downstream code needs is the CLI-reported installed version.
+   * Lightweight version query; use `checkVersionCompatibility()` when you also
+   * need the per-agent supported/minimum reference points.
    */
   async getVersionInfo(): Promise<AgentVersionInfo> {
     const installedVersion = await this.getVersion();
@@ -266,8 +271,87 @@ export abstract class BaseAgentAdapter implements AgentAdapter {
   }
 
   /**
+   * Check the installed version against the per-agent pinned constants
+   * (`metadata.supportedVersion` / `metadata.minimumSupportedVersion`).
+   *
+   * The comparison flags are informational only — the version-check is
+   * non-blocking (EPMCDME-13734): callers must never `throw`, `process.exit`,
+   * or `inquirer.prompt` based on the result. Use `warnOnceIfUntested()` for
+   * the standard one-time non-blocking notice.
+   */
+  async checkVersionCompatibility(): Promise<VersionCompatibilityResult> {
+    const supportedVersion = this.metadata.supportedVersion || 'latest';
+    const minimumSupportedVersion = this.metadata.minimumSupportedVersion;
+    const installedVersion = await this.getVersion();
+
+    if (!installedVersion) {
+      return {
+        compatible: false,
+        installedVersion: null,
+        supportedVersion,
+        isNewer: false,
+        hasUpdate: false,
+        isBelowMinimum: false,
+        minimumSupportedVersion,
+      };
+    }
+
+    if (!this.metadata.supportedVersion) {
+      return {
+        compatible: true,
+        installedVersion,
+        supportedVersion: 'latest',
+        isNewer: false,
+        hasUpdate: false,
+        isBelowMinimum: false,
+        minimumSupportedVersion,
+      };
+    }
+
+    try {
+      const comparison = compareVersions(installedVersion, supportedVersion);
+      const hasUpdate = comparison < 0;
+      let isBelowMinimum = false;
+      if (minimumSupportedVersion) {
+        isBelowMinimum = compareVersions(installedVersion, minimumSupportedVersion) < 0;
+      }
+      return {
+        compatible: comparison <= 0,
+        installedVersion,
+        supportedVersion,
+        isNewer: comparison > 0,
+        hasUpdate,
+        isBelowMinimum,
+        minimumSupportedVersion,
+      };
+    } catch (error) {
+      const errorContext = createErrorContext(error, { agent: this.metadata.name });
+      logger.warn('[checkVersionCompatibility] version comparison failed, treating as incompatible', {
+        ...errorContext,
+        installedVersion,
+        supportedVersion,
+      });
+      return {
+        compatible: false,
+        installedVersion,
+        supportedVersion,
+        isNewer: false,
+        hasUpdate: false,
+        isBelowMinimum: false,
+        minimumSupportedVersion,
+      };
+    }
+  }
+
+  /**
    * Emit a one-time "untested version" notice per (agent, agent-version)
    * pair and record the marker so future launches stay silent.
+   *
+   * Fires **only when the installed version does not match** the per-agent
+   * pinned `metadata.supportedVersion` — a user in the tested range is never
+   * notified. Once notified for a given (agent, agent-version), the marker
+   * suppresses the notice on every subsequent launch, regardless of what
+   * CodeMie version the user is on.
    *
    * Contract:
    *  - Never throws. All failures are swallowed and logged; version-check must
@@ -276,14 +360,24 @@ export abstract class BaseAgentAdapter implements AgentAdapter {
    *  - Non-interactive / silentMode / non-TTY: `logger.warn()` only, no stderr banner.
    *  - Interactive TTY + non-silent: chalk banner to stderr AND `logger.warn()`.
    *  - No-op when `getVersion()` returns null (nothing to warn about).
+   *  - No-op when `metadata.supportedVersion` is unset (no reference to compare against).
+   *  - No-op when installed matches supported (user in tested range — no mismatch).
    *  - Running CodeMie version is displayed in the notice for context but is
    *    NOT part of the marker key — a CodeMie release must not re-nag users
    *    about an agent version they have already acknowledged (EPMCDME-13734).
    */
   async warnOnceIfUntested(): Promise<void> {
     try {
-      const { installedVersion } = await this.getVersionInfo();
+      const compat = await this.checkVersionCompatibility();
+      const { installedVersion, supportedVersion } = compat;
       if (!installedVersion) {
+        return;
+      }
+      if (!this.metadata.supportedVersion) {
+        return;
+      }
+      // No mismatch — user is on the version CodeMie last recorded.
+      if (installedVersion === supportedVersion) {
         return;
       }
 
@@ -305,20 +399,22 @@ export abstract class BaseAgentAdapter implements AgentAdapter {
       const { isInteractive } = await import('../../utils/tty.js');
       const isSilent = this.metadata.silentMode === true;
       const noticeLine =
-        `CodeMie has not yet been tested with ${this.metadata.name} v${installedVersion} ` +
-        `(running CodeMie v${codemieVersion}). Proceeding — this notice is shown once.`;
+        `CodeMie has verified ${this.metadata.name} v${supportedVersion}; ` +
+        `you are on v${installedVersion} (running CodeMie v${codemieVersion}). ` +
+        `Proceeding — this notice is shown once for this version.`;
 
       logger.warn(noticeLine, {
         agent: this.metadata.name,
         installedVersion,
+        supportedVersion,
         codemieVersion,
       });
 
       if (!isSilent && isInteractive()) {
         console.error();
         console.error(chalk.yellow(`⚠  ${noticeLine}`));
-        console.error(chalk.white('   If anything looks off, you can install a different version with:'));
-        console.error(chalk.blueBright(`     codemie install ${this.metadata.name} --latest`));
+        console.error(chalk.white('   To install the version CodeMie last verified, run:'));
+        console.error(chalk.blueBright(`     codemie install ${this.metadata.name} --supported`));
         console.error();
       }
 

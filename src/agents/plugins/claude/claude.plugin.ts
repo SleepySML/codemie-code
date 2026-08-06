@@ -30,6 +30,25 @@ import {
 let statuslineManagedThisSession = false;
 
 /**
+ * Supported Claude Code version
+ * Latest version tested and verified with CodeMie backend.
+ * Bump this when a new claude release has been validated with CodeMie.
+ *
+ * **UPDATE THIS WHEN BUMPING CLAUDE VERSION**
+ */
+export const CLAUDE_SUPPORTED_VERSION = '2.1.218';
+
+/**
+ * Minimum supported Claude Code version
+ * Reference for the oldest version CodeMie has verified against.
+ * Never blocks — the version-check is non-blocking (EPMCDME-13734); the value is
+ * kept as documentation for CodeMie team + display.
+ *
+ * **UPDATE THIS WHEN BUMPING CLAUDE VERSION**
+ */
+const CLAUDE_MINIMUM_SUPPORTED_VERSION = '2.1.208';
+
+/**
  * Claude Code installer URLs
  * Official Anthropic installer scripts for native installation
  */
@@ -51,6 +70,12 @@ export const ClaudePluginMetadata: AgentMetadata = {
   cliCommand: 'claude',
 
   sessionAnalyticsReport: true,
+
+  // Version management configuration — reference points for the non-blocking
+  // one-time untested-version notice (EPMCDME-13734). Bumped manually per
+  // CodeMie release as new claude versions are validated.
+  supportedVersion: CLAUDE_SUPPORTED_VERSION,
+  minimumSupportedVersion: CLAUDE_MINIMUM_SUPPORTED_VERSION,
 
   // Native installer URLs (used by installNativeAgent utility)
   installerUrls: CLAUDE_INSTALLER_URLS,

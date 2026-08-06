@@ -68,6 +68,9 @@ const baseMeta = (overrides: Partial<AgentMetadata>): AgentMetadata =>
     envMapping: {},
     supportedProviders: ['anthropic-subscription'],
     silentMode: false,
+    // Reference point for the notice. Tests that want a mismatch use an
+    // installedVersion different from this; tests that want silence match it.
+    supportedVersion: '2.1.218',
     ...(overrides as any),
   }) as AgentMetadata;
 
@@ -77,6 +80,30 @@ describe('BaseAgentAdapter.warnOnceIfUntested', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+
+  it('is a no-op when installed matches metadata.supportedVersion', async () => {
+    const { BaseAgentAdapter } = await import('../BaseAgentAdapter.js');
+    const { VersionWarningStore } = await import('../../../utils/version-warnings.js');
+    class Adapter extends BaseAgentAdapter {}
+    const adapter = new Adapter(baseMeta({}));
+    vi.spyOn(adapter as any, 'getVersion').mockResolvedValue('2.1.218'); // matches supportedVersion
+    await adapter.warnOnceIfUntested();
+    expect(VersionWarningStore.hasWarned).not.toHaveBeenCalled();
+    expect(VersionWarningStore.recordWarning).not.toHaveBeenCalled();
+    expect(stderrSpy).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op when metadata.supportedVersion is unset (no reference to compare)', async () => {
+    const { BaseAgentAdapter } = await import('../BaseAgentAdapter.js');
+    const { VersionWarningStore } = await import('../../../utils/version-warnings.js');
+    class Adapter extends BaseAgentAdapter {}
+    const adapter = new Adapter(baseMeta({ supportedVersion: undefined }));
+    vi.spyOn(adapter as any, 'getVersion').mockResolvedValue('2.1.219');
+    await adapter.warnOnceIfUntested();
+    expect(VersionWarningStore.hasWarned).not.toHaveBeenCalled();
+    expect(VersionWarningStore.recordWarning).not.toHaveBeenCalled();
+    expect(stderrSpy).not.toHaveBeenCalled();
   });
 
   it('is a no-op when getVersion() returns null', async () => {
@@ -114,7 +141,7 @@ describe('BaseAgentAdapter.warnOnceIfUntested', () => {
     expect(VersionWarningStore.recordWarning).toHaveBeenCalledWith('claude', '2.1.219');
     expect(stderrSpy).toHaveBeenCalled();
     const anyCallHasHeader = stderrSpy.mock.calls.some((call) =>
-      typeof call[0] === 'string' && (call[0] as string).includes('CodeMie has not yet been tested'),
+      typeof call[0] === 'string' && (call[0] as string).includes('CodeMie has verified'),
     );
     expect(anyCallHasHeader).toBe(true);
   });

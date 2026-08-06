@@ -54,32 +54,25 @@ async function checkAgentForUpdate(agent: AgentAdapter): Promise<UpdateCheckResu
     return null;
   }
 
-  // Special handling for Claude (uses native installer, not npm-global). The npm
-  // registry entry for @anthropic-ai/claude-code still tracks the latest published
-  // version, so we query it directly instead of the removed metadata.supportedVersion.
-  if (agent.name === 'claude') {
+  // Special handling for Claude (uses native installer, not npm). The compat
+  // check reads the pinned CLAUDE_SUPPORTED_VERSION constant — that's what
+  // CodeMie has verified against, and it's what `update` targets.
+  if (agent.name === 'claude' && agent.checkVersionCompatibility) {
+    const compat = await agent.checkVersionCompatibility();
+    const supportedVersion = compat.supportedVersion;
     const cleanCurrentVersion = extractVersion(currentVersion) || currentVersion;
-    const latestVersion = await npm.getLatestVersion('@anthropic-ai/claude-code');
-    if (!latestVersion) return null;
+    const cleanSupported = extractVersion(supportedVersion);
+    if (!cleanSupported) return null;
 
-    const cleanLatestVersion = extractVersion(latestVersion) || latestVersion;
-    if (!isValidSemanticVersion(cleanCurrentVersion) || !isValidSemanticVersion(cleanLatestVersion)) {
-      logger.debug('Invalid version format for claude, skipping update check', {
-        cleanCurrentVersion,
-        cleanLatestVersion,
-      });
-      return null;
-    }
-
-    const hasUpdate = compareVersions(cleanCurrentVersion, cleanLatestVersion) < 0;
+    const hasUpdate = compareVersions(cleanCurrentVersion, cleanSupported) < 0;
 
     return {
       name: agent.name,
       displayName: agent.displayName,
       currentVersion: cleanCurrentVersion,
-      latestVersion: cleanLatestVersion,
+      latestVersion: cleanSupported,
       hasUpdate,
-      npmPackage: '@anthropic-ai/claude-code',
+      npmPackage: '@anthropic-ai/claude-code', // Kept for compatibility; unused for Claude
     };
   }
 
@@ -213,9 +206,10 @@ async function promptAgentSelection(outdated: UpdateCheckResult[]): Promise<stri
  * Update a single agent
  */
 async function updateAgent(agent: AgentAdapter, latestVersion: string): Promise<void> {
-  // Special handling for Claude (uses native installer)
+  // Special handling for Claude (uses native installer) — install the pinned
+  // supported version so first-launch notice stays consistent with the marker.
   if (agent.name === 'claude' && agent.installVersion) {
-    await agent.installVersion('latest');
+    await agent.installVersion('supported');
   } else if (agent.metadata.isBuiltIn) {
     // Special handling for built-in agent — update the CLI package
     await npm.installGlobal('@codemieai/code', { version: latestVersion, force: true });

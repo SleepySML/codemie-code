@@ -61,29 +61,37 @@ vi.mock('../../../../utils/tty.js', () => ({
 describe('CodexPlugin — one-time untested-version warning contract', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('does not export a supported-version constant', async () => {
-    const mod = (await import('../codex.plugin.js')) as unknown as Record<string, unknown>;
-    expect(mod.CODEX_SUPPORTED_VERSION).toBeUndefined();
-    expect(mod.CODEX_MINIMUM_SUPPORTED_VERSION).toBeUndefined();
-  });
-
-  it('does not carry supportedVersion or minimumSupportedVersion on its metadata', async () => {
+  it('carries supportedVersion and minimumSupportedVersion on its metadata (bumped manually per CodeMie release)', async () => {
     const { CodexPluginMetadata } = await import('../codex.plugin.js');
-    expect(CodexPluginMetadata.supportedVersion).toBeUndefined();
-    expect(CodexPluginMetadata.minimumSupportedVersion).toBeUndefined();
+    expect(CodexPluginMetadata.supportedVersion).toBe('0.143.0');
+    expect(CodexPluginMetadata.minimumSupportedVersion).toBe('0.133.0');
   });
 
-  it('warnOnceIfUntested emits + records marker on first launch with unacknowledged version', async () => {
+  it('warnOnceIfUntested is silent when installed matches supportedVersion (no mismatch)', async () => {
     const { VersionWarningStore } = await import('../../../../utils/version-warnings.js');
     vi.mocked(VersionWarningStore.hasWarned).mockResolvedValue(false);
 
     const { CodexPlugin } = await import('../codex.plugin.js');
     const adapter = new CodexPlugin();
-    vi.spyOn(adapter, 'getVersion').mockResolvedValue('0.143.0');
+    vi.spyOn(adapter, 'getVersion').mockResolvedValue('0.143.0'); // matches metadata
 
     await adapter.warnOnceIfUntested();
 
-    expect(VersionWarningStore.recordWarning).toHaveBeenCalledWith('codex', '0.143.0');
+    expect(VersionWarningStore.hasWarned).not.toHaveBeenCalled();
+    expect(VersionWarningStore.recordWarning).not.toHaveBeenCalled();
+  });
+
+  it('warnOnceIfUntested emits + records marker when installed differs from supportedVersion', async () => {
+    const { VersionWarningStore } = await import('../../../../utils/version-warnings.js');
+    vi.mocked(VersionWarningStore.hasWarned).mockResolvedValue(false);
+
+    const { CodexPlugin } = await import('../codex.plugin.js');
+    const adapter = new CodexPlugin();
+    vi.spyOn(adapter, 'getVersion').mockResolvedValue('0.150.0'); // newer than supported 0.143.0
+
+    await adapter.warnOnceIfUntested();
+
+    expect(VersionWarningStore.recordWarning).toHaveBeenCalledWith('codex', '0.150.0');
   });
 
   it('warnOnceIfUntested is silent and does not record when marker is present', async () => {
@@ -92,7 +100,7 @@ describe('CodexPlugin — one-time untested-version warning contract', () => {
 
     const { CodexPlugin } = await import('../codex.plugin.js');
     const adapter = new CodexPlugin();
-    vi.spyOn(adapter, 'getVersion').mockResolvedValue('0.143.0');
+    vi.spyOn(adapter, 'getVersion').mockResolvedValue('0.150.0');
 
     await adapter.warnOnceIfUntested();
 

@@ -6,6 +6,25 @@ import type { SessionAdapter } from '../../core/session/BaseSessionAdapter.js';
 import { GeminiExtensionInstaller } from './gemini.extension-installer.js';
 import type { BaseExtensionInstaller } from '../../core/extension/BaseExtensionInstaller.js';
 
+/**
+ * Supported Gemini CLI version
+ * Latest version tested and verified with CodeMie backend.
+ * Bump this when a new gemini release has been validated with CodeMie.
+ *
+ * **UPDATE THIS WHEN BUMPING GEMINI VERSION**
+ */
+const GEMINI_SUPPORTED_VERSION = '0.29.5';
+
+/**
+ * Minimum supported Gemini CLI version
+ * Reference for the oldest version CodeMie has verified against.
+ * Never blocks — the version-check is non-blocking (EPMCDME-13734); the value is
+ * kept as documentation for CodeMie team + display.
+ *
+ * **UPDATE THIS WHEN BUMPING GEMINI VERSION**
+ */
+const GEMINI_MINIMUM_SUPPORTED_VERSION = '0.29.0';
+
 // Define metadata first (used by both lifecycle and analytics)
 const metadata = {
   name: 'gemini',
@@ -14,6 +33,12 @@ const metadata = {
 
   npmPackage: '@google/gemini-cli',
   cliCommand: 'gemini',
+
+  // Version management configuration — reference points for the non-blocking
+  // one-time untested-version notice (EPMCDME-13734). Bumped manually per
+  // CodeMie release as new gemini versions are validated.
+  supportedVersion: GEMINI_SUPPORTED_VERSION,
+  minimumSupportedVersion: GEMINI_MINIMUM_SUPPORTED_VERSION,
 
   envMapping: {
     baseUrl: ['GOOGLE_GEMINI_BASE_URL', 'GEMINI_BASE_URL'],

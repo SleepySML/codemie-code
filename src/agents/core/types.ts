@@ -194,12 +194,28 @@ export interface AgentAnalyticsAdapter {
 /**
  * Installed-version snapshot for an agent adapter.
  *
- * Superseded shape of the version-check output. CodeMie no longer pins a
- * "supported version" per agent (see EPMCDME-13734), so the only signal
- * downstream callers need is the CLI-reported installed version.
+ * Lightweight version query result: just the CLI-reported installed version.
+ * Complementary to `VersionCompatibilityResult` which also carries the
+ * per-agent `supportedVersion` reference and comparison flags.
  */
 export interface AgentVersionInfo {
   installedVersion: string | null;
+}
+
+/**
+ * Result of the non-blocking version check against per-agent pinned constants
+ * (`*_SUPPORTED_VERSION`, `*_MINIMUM_SUPPORTED_VERSION` — bumped manually per
+ * CodeMie release). Comparison flags never gate blocking behavior — see
+ * EPMCDME-13734: any mismatch triggers only a one-time non-blocking notice.
+ */
+export interface VersionCompatibilityResult {
+  compatible: boolean;              // true if installed <= supported
+  installedVersion: string | null;  // null if not installed
+  supportedVersion: string;         // from metadata; 'latest' when unset
+  isNewer: boolean;                 // installed > supported
+  hasUpdate: boolean;               // installed < supported
+  isBelowMinimum: boolean;          // installed < minimumSupportedVersion (informational only)
+  minimumSupportedVersion?: string;
 }
 
 /**
@@ -214,6 +230,23 @@ export interface AgentMetadata {
   // === Installation ===
   npmPackage: string | null;       // '@anthropic-ai/claude-code' or null for built-in
   cliCommand: string | null;       // 'claude' or null for built-in
+
+  /**
+   * Latest supported version tested with CodeMie backend. Reference point for
+   * the non-blocking one-time untested-version notice (EPMCDME-13734). Bumped
+   * manually per CodeMie release as new agent CLI versions are validated.
+   *
+   * Format: Semantic version string (e.g., '2.1.218').
+   */
+  supportedVersion?: string;
+
+  /**
+   * Oldest version CodeMie has verified against. Reference point only —
+   * never blocks startup (EPMCDME-13734).
+   *
+   * Format: Semantic version string (e.g., '2.1.208').
+   */
+  minimumSupportedVersion?: string;
 
   /**
    * Native installer URLs for platform-specific installation
@@ -802,15 +835,24 @@ export interface AgentAdapter {
   installVersion?(version: string): Promise<string | null>;
 
   /**
-   * Return the installed-version snapshot for this adapter.
-   * Replaces the compatibility-oriented output of `checkVersionCompatibility()`.
+   * Return the installed-version snapshot for this adapter (lightweight).
    */
   getVersionInfo(): Promise<AgentVersionInfo>;
 
   /**
-   * Emit a one-time "untested version" notice for the current
-   * (agent, agent-version, codemie-version) tuple and record the marker so
-   * future launches stay silent. Never throws, never blocks.
+   * Compare the installed version against the pinned per-agent constants
+   * (`supportedVersion` / `minimumSupportedVersion`) and return the comparison
+   * flags. Comparison flags are informational only — the caller must not use
+   * them to block (EPMCDME-13734). Optional: adapters without pinned constants
+   * (e.g. built-in) may omit this method.
+   */
+  checkVersionCompatibility?(): Promise<VersionCompatibilityResult>;
+
+  /**
+   * Emit a one-time "untested version" notice per (agent, agent-version) pair
+   * when the installed version differs from `metadata.supportedVersion`, and
+   * record the marker so future launches stay silent. Never throws, never
+   * blocks. Non-blocking regardless of how far installed drifts from supported.
    */
   warnOnceIfUntested(): Promise<void>;
 

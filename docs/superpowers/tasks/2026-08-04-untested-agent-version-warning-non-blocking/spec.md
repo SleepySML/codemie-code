@@ -2,64 +2,77 @@
 
 ## Summary
 
-Replace the blocking agent-version checks in CodeMie CLI with a **one-time, non-blocking "untested version" warning**. Warn once per `(agent, agent-version)` pair, at user scope, then stay silent forever until the agent version changes or the user resets the markers. The running CodeMie version is displayed in the notice for context but is deliberately **not** part of the marker key — a CodeMie release must not re-nag users about an agent version they have already acknowledged. Version mismatches never block execution and never throw in non-interactive contexts. All pinned per-agent supported-version constants disappear from the codebase; agent CLIs can release independently without a CodeMie release to keep users unblocked.
+Replace the blocking agent-version checks in CodeMie CLI with a **one-time, non-blocking mismatch notice**. Each plugin keeps a manually-bumped `SUPPORTED_VERSION` constant (updated per CodeMie release when a new agent CLI version is validated). When a user's installed agent version differs from the pinned `SUPPORTED_VERSION`, CodeMie shows one `chalk.yellow` line to stderr — never blocks, never throws, never prompts — and records the `(agent, installed-version)` pair to `~/.codemie/version-warnings.json`. Subsequent launches of the same pair stay silent. When the installed version matches the pinned supported version, no notice is shown at all. The running CodeMie version is displayed in the banner text for context but is **not** part of the marker key — a CodeMie release must not re-nag users about an agent version they have already acknowledged.
 
 ## Goals
 
-- User is never prevented from launching a wrapped agent by a version check.
-- User is never nagged more than once per unique `(agent, agent-version)` pair — CodeMie releases do not reset acknowledgements.
-- CodeMie no longer ships pinned per-agent supported-version constants; no CodeMie release is required to acknowledge a new agent CLI release.
-- Non-interactive contexts (ACP, silent, non-TTY, CI, scripted) log a warning and proceed automatically — they never throw or `inquirer.prompt`.
+- User is never prevented from launching a wrapped agent by a version check — no `throw`, no `process.exit`, no `inquirer.prompt` for any version condition.
+- User is never nagged more than once per `(agent, installed-agent-version)` pair — CodeMie releases do not reset acknowledgements.
+- Pinned per-agent constants (`*_SUPPORTED_VERSION`, `*_MINIMUM_SUPPORTED_VERSION`) stay in the codebase, bumped manually per CodeMie release when a new agent CLI has been validated. They serve as the reference point for the mismatch check and the target of `codemie install <agent> --supported`.
+- User in the tested range (`installedVersion === metadata.supportedVersion`) never sees a notice.
+- Non-interactive contexts (ACP, silent, non-TTY, CI, scripted) log a warning and proceed automatically — never throw, never prompt.
 - `codemie doctor` surfaces per-agent verification status so users can see, at a glance, which agent versions have already been acknowledged.
 
 ## Non-Goals
 
-- We do not introduce any positive verification list. There is no "verified" outcome that requires CodeMie action.
-- We do not build per-agent-version reset (users reset all markers, or nothing).
-- We do not change the `DISABLE_AUTOUPDATER=1` lifecycle behavior — it remains in place.
-- We do not modify auto-update logic or the CLI updater path.
-- We do not introduce a UI to view the raw warned-markers store.
+- No blocking behavior of any kind — even below `minimumSupportedVersion`. That constant remains only for informational/display purposes.
+- No per-agent-version reset (users reset all markers, or nothing).
+- No changes to `DISABLE_AUTOUPDATER=1` lifecycle behavior or the CLI updater path.
+- No UI to view the raw warned-markers store.
+- No re-introduction of the `checkVersionCompatibility` blocking branches or the old `inquirer.prompt` UX.
 
 ## User-Visible Behavior
 
-### 1. First launch with an unacknowledged agent version (interactive TTY)
+### 1. First launch with a mismatched agent version (interactive TTY)
 
 ```
 $ codemie claude
-⚠  CodeMie has not yet been tested with claude v2.1.219
-   (running CodeMie v0.11.0). Proceeding — this notice is shown once.
+⚠  CodeMie has verified claude v2.1.218; you are on v2.1.219
+   (running CodeMie v0.11.0). Proceeding — this notice is shown once for this version.
 
-  If anything looks off, you can install a different version with:
-     codemie install claude --latest
-     codemie install claude 2.1.218
+   To install the version CodeMie last verified, run:
+     codemie install claude --supported
 
 <agent starts normally>
 ```
 
-- Written with `chalk.yellow` for the header and plain white for the guidance lines.
+- Fires only when `installedVersion !== metadata.supportedVersion`.
+- Written with `chalk.yellow` for the header and plain white for the guidance line.
 - Emitted to stderr (so `codemie claude --print ... | jq` still works).
 - Marker `{agentName: "claude", agentVersion: "2.1.219"}` is recorded to `~/.codemie/version-warnings.json` **after** the warning is printed. The running CodeMie version appears in the banner text but is **not** stored in the marker.
 - Agent launches immediately after the marker is persisted.
 
-### 2. Repeat launch with an already-acknowledged pair
+### 2. Launch while installed matches supported (in tested range)
+
+```
+$ codemie claude
+<agent starts normally, no version banner, no marker recorded>
+```
+
+- No comparison-based notice fires. No marker recorded (there was nothing to acknowledge).
+- Doctor renders "Untested" until the user experiences a mismatch and acknowledges it — this is the price of the simple 3-state doctor rendering the ticket asked for.
+
+### 3. Repeat launch with an already-acknowledged mismatch
 
 ```
 $ codemie claude
 <agent starts normally, no version banner>
 ```
 
-- Marker lookup short-circuits *before* `getVersion()` is even called if a snapshot of last-seen version is stored alongside the marker (see "Optimization" below). Otherwise `getVersion()` runs, marker is found, warning is suppressed.
+- Store's `hasWarned(agent, installedVersion)` short-circuits before any output.
 
-### 3. Non-interactive / ACP / silent / non-TTY / CI / scripted
+### 4. Non-interactive / ACP / silent / non-TTY / CI / scripted
 
 - Warning is emitted via `logger.warn()` only. No prose is written to stdout — stdout stays clean for JSON-RPC in ACP, for piped scripts, and for CI.
-- The `isBelowMinimum` and `isNewer` branches never throw. The current `throw new Error(...)` in `BaseAgentAdapter.run()` for `silentMode` is removed.
+- Never `throw`, never `process.exit`, never `inquirer.prompt` — even below `minimumSupportedVersion`.
 - Marker is recorded exactly as in the interactive case, so subsequent runs stay silent.
 
-### 4. `codemie install <agent>`, `codemie update <agent>`, `codemie setup`
+### 5. `codemie install <agent>`, `codemie update <agent>`, `codemie setup`
 
-- Same one-time-warning behavior applies at these entry points if they detect an unacknowledged installed version. None of these commands block on version mismatch.
-- `codemie install <agent> --supported` silently routes to `--latest`. The metadata field `supportedVersion` is gone; the flag is preserved for script compatibility and resolves to `'latest'` at the plugin's `installVersion()` boundary. No deprecation message. Downstream install output no longer references "supported version" anywhere.
+- `codemie install <agent> --supported` resolves to `metadata.supportedVersion` (the pinned constant) — same as the old behavior. The flag exists specifically so users can pin back to what CodeMie has verified after seeing the mismatch notice.
+- `codemie install <agent>` without version defaults to `--supported` for claude / codex (backend-compat sensitive) and to the plugin's own default for other agents.
+- `codemie update <agent>` targets `metadata.supportedVersion` for claude (native installer) and `getLatestVersion` from npm for the others.
+- `codemie setup` runs `warnOnceIfUntested()` on the Claude adapter — silent when installed matches supported, one-time notice on mismatch.
 
 ### 5. `codemie doctor`
 

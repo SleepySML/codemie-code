@@ -22,6 +22,19 @@ import { resolveHomeDir } from '../../../utils/paths.js';
 
 const KIMI_NATIVE_BINARY_PATH = '.kimi-code/bin/kimi';
 
+/**
+ * Supported Kimi CLI version — bump on CodeMie release when a new kimi version
+ * has been validated. Reference point for the non-blocking one-time notice
+ * (EPMCDME-13734).
+ */
+const KIMI_SUPPORTED_VERSION = '0.16.0';
+
+/**
+ * Minimum supported Kimi CLI version — reference for the oldest version CodeMie
+ * has verified against. Never blocks (EPMCDME-13734).
+ */
+const KIMI_MINIMUM_SUPPORTED_VERSION = '0.15.0';
+
 const KIMI_INSTALLER_URLS = {
   macOS: 'https://code.kimi.com/kimi-code/install.sh',
   windows: 'https://code.kimi.com/kimi-code/install.ps1',
@@ -34,6 +47,8 @@ export const KimiPluginMetadata: AgentMetadata = {
   description: 'Kimi Code CLI - Moonshot AI coding agent',
   npmPackage: '@moonshot-ai/kimi-code',
   cliCommand: 'kimi',
+  supportedVersion: KIMI_SUPPORTED_VERSION,
+  minimumSupportedVersion: KIMI_MINIMUM_SUPPORTED_VERSION,
   installerUrls: KIMI_INSTALLER_URLS,
   dataPaths: {
     home: '.kimi-code',
@@ -327,17 +342,21 @@ export class KimiPlugin extends BaseAgentAdapter {
   }
 
   override async installVersion(version?: string): Promise<string | null> {
-    // Kimi uses the native installer. The 'supported' keyword now aliases to
-    // 'latest' (EPMCDME-13734), and 'npm' / 'latest' / 'stable' all translate
-    // to "install the latest published build" — which for the native installer
-    // means invoking it without a specific version pin.
+    // Kimi uses the native installer. 'supported' resolves to metadata.supportedVersion
+    // (bumped manually per CodeMie release). 'npm' / 'latest' / 'stable' translate
+    // to "install the latest published build" — invoking the native installer
+    // without a specific version pin.
     let resolvedVersion: string | undefined = version;
-    if (
-      version === 'supported' ||
-      version === 'npm' ||
-      version === 'latest' ||
-      version === 'stable'
-    ) {
+    if (version === 'supported') {
+      if (!this.metadata.supportedVersion) {
+        throw new AgentInstallationError(
+          this.metadata.name,
+          'No supported version defined in metadata',
+        );
+      }
+      resolvedVersion = this.metadata.supportedVersion;
+      logger.debug('Resolved kimi version', { from: 'supported', to: resolvedVersion });
+    } else if (version === 'npm' || version === 'latest' || version === 'stable') {
       resolvedVersion = undefined;
     }
 
