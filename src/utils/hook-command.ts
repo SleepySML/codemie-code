@@ -34,8 +34,14 @@ function quoteIfNeeded(p: string): string {
  * The result is quoted when it contains whitespace or shell-special characters.
  */
 export async function resolveCodemieBinary(): Promise<string> {
-  const resolved = await getCommandPath('codemie');
-  if (resolved) return quoteIfNeeded(resolved);
+  // Resolution must never throw — it runs in agent beforeRun/hook paths where a
+  // failure would break launch. Any error degrades to the next fallback.
+  try {
+    const resolved = await getCommandPath('codemie');
+    if (resolved) return quoteIfNeeded(resolved);
+  } catch {
+    // fall through to argv[1] / bare command
+  }
 
   const argv1 = process.argv[1];
   if (argv1) return quoteIfNeeded(argv1);

@@ -15,6 +15,12 @@
  * 3. Models that deprecate sampling parameters (e.g. claude-sonnet-5):
  *    → strips temperature / top_p / top_k entirely to prevent API errors
  *
+ * 4. Models that do NOT support the effort parameter (everything except the
+ *    adaptive-thinking models in ADAPTIVE_THINKING_MODEL_PATTERNS, e.g.
+ *    claude-4-5-sonnet):
+ *    → strips output_config.effort and any top-level effort to prevent
+ *      "This model does not support the effort parameter" HTTP 400 errors
+ *
  * Problem: Claude Code sends `thinking: { type: "enabled", budget_tokens: N }`.
  * - Haiku models reject thinking field with HTTP 400
  * - Opus 4-7+ requires adaptive thinking format with output_config.effort
@@ -133,6 +139,41 @@ function handleAdaptiveThinkingTransform(body: any, model: string): boolean {
   return true;
 }
 
+/**
+ * Handler: strips the `effort` parameter for models that do NOT support the
+ * adaptive-thinking/effort API. Newer Claude Code translates its `--effort` CLI
+ * flag into `output_config.effort` (or a top-level `effort`) in the request
+ * body; models like claude-4-5-sonnet reject it with HTTP 400. Adaptive models
+ * (opus-4-7+, sonnet-5) legitimately accept effort and are left untouched.
+ * Returns true if anything was stripped.
+ */
+function handleUnsupportedEffort(body: any, model: string): boolean {
+  if (modelRequiresAdaptiveThinking(model)) {
+    return false;
+  }
+
+  let stripped = false;
+
+  const outputConfig = body.output_config;
+  if (outputConfig && typeof outputConfig === 'object' && 'effort' in outputConfig) {
+    delete outputConfig.effort;
+    stripped = true;
+    if (Object.keys(outputConfig).length === 0) {
+      delete body.output_config;
+    }
+  }
+
+  if ('effort' in body) {
+    delete body.effort;
+    stripped = true;
+  }
+
+  if (stripped) {
+    logger.debug(`[claude-request-normalizer] Stripped unsupported effort parameter for model: ${model}`);
+  }
+  return stripped;
+}
+
 function handleDeprecatedSamplingParams(body: any, model: string): boolean {
   if (!modelDisablesSamplingParameters(model)) {
     return false;
@@ -197,6 +238,10 @@ class ClaudeRequestNormalizerInterceptor implements ProxyInterceptor {
 
       const modifiedBySampling = handleDeprecatedSamplingParams(body, model);
 
+      // Runs regardless of body.thinking — Claude Code can send `effort` without
+      // a thinking field, so this must not sit behind the thinking guard below.
+      const modifiedByEffort = handleUnsupportedEffort(body, model);
+
       let modifiedByThinking = false;
       if (body.thinking) {
         // Chain handlers: first match wins and modifies body
@@ -205,7 +250,7 @@ class ClaudeRequestNormalizerInterceptor implements ProxyInterceptor {
           handleAdaptiveThinkingTransform(body, model);
       }
 
-      if (modifiedBySampling || modifiedByThinking) {
+      if (modifiedBySampling || modifiedByEffort || modifiedByThinking) {
         const newBodyStr = JSON.stringify(body);
         context.requestBody = Buffer.from(newBodyStr, 'utf-8');
         context.headers['content-length'] = String(context.requestBody.length);

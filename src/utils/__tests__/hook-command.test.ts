@@ -42,6 +42,15 @@ describe('hook-command resolver', () => {
     spy.mockRestore();
   });
 
+  it('resolveCodemieBinary never throws — falls back when getCommandPath is unavailable/throws', async () => {
+    // Simulates an incomplete mock or a resolver failure: must degrade, not crash.
+    vi.doMock('../processes.js', () => ({}));
+    const spy = vi.spyOn(process, 'argv', 'get').mockReturnValue(['node', '/home/u/.npm/bin/codemie']);
+    const { resolveCodemieBinary } = await import('../hook-command.js');
+    await expect(resolveCodemieBinary()).resolves.toBe('/home/u/.npm/bin/codemie');
+    spy.mockRestore();
+  });
+
   it('rewriteHooksCommandTree rewrites every command and reports change', async () => {
     const { rewriteHooksCommandTree } = await import('../hook-command.js');
     const hooks = {
