@@ -19,10 +19,16 @@ describe('006-resolve-hook-command-paths', () => {
     vi.doMock('../../utils/processes.js', () => ({
       getCommandPath: vi.fn().mockResolvedValue('/abs/codemie'),
     }));
+    // homedir() is mocked to the temp dir, so the real file-backed logger would
+    // write (and keep open) log files under <temp>/.codemie/logs. On Windows an
+    // open handle blocks rmdir (ENOTEMPTY) in afterEach — mock it to a no-op.
+    vi.doMock('../../utils/logger.js', () => ({
+      logger: { info: vi.fn(), warn: vi.fn(), debug: vi.fn(), error: vi.fn() },
+    }));
   });
 
   afterEach(async () => {
-    await rm(home, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true, maxRetries: 3 });
   });
 
   async function seedClaudeHooks(): Promise<string> {
