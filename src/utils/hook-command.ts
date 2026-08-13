@@ -22,6 +22,10 @@ function quoteIfNeeded(p: string): string {
   return NEEDS_QUOTING.test(p) && !p.startsWith('"') ? `"${p}"` : p;
 }
 
+function alwaysQuote(p: string): string {
+  return p.startsWith('"') ? p : `"${p}"`;
+}
+
 /**
  * Resolve an absolute, directly-invocable command prefix for the codemie CLI.
  *
@@ -44,7 +48,16 @@ export async function resolveCodemieBinary(): Promise<string> {
   }
 
   const argv1 = process.argv[1];
-  if (argv1) return quoteIfNeeded(argv1);
+  if (argv1) {
+    // On Windows a raw .js entry path is not directly invocable as a hook command
+    // (cmd.exe needs a `node` prefix); on Unix argv[1] runs via its shebang.
+    // Always quote both tokens here — a `node <script>` invocation must survive
+    // spaces in either path (e.g. "C:\Program Files\nodejs\node.exe").
+    if (process.platform === 'win32' && /\.[cm]?js$/i.test(argv1)) {
+      return `${alwaysQuote(process.execPath)} ${alwaysQuote(argv1)}`;
+    }
+    return quoteIfNeeded(argv1);
+  }
 
   return 'codemie';
 }

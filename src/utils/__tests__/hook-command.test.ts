@@ -51,6 +51,33 @@ describe('hook-command resolver', () => {
     spy.mockRestore();
   });
 
+  it('resolveCodemieBinary: on Windows, a .js argv[1] fallback is prefixed with the node executable', async () => {
+    vi.doMock('../processes.js', () => ({ getCommandPath: vi.fn().mockResolvedValue(null) }));
+    const argvSpy = vi.spyOn(process, 'argv', 'get').mockReturnValue(['node', 'C:\\Users\\u\\app\\codemie.js']);
+    const platSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    const execSpy = vi.spyOn(process, 'execPath', 'get').mockReturnValue('C:\\Program Files\\nodejs\\node.exe');
+    const { resolveCodemieBinary, resolveHookCommand } = await import('../hook-command.js');
+    const bin = await resolveCodemieBinary();
+    // A raw .js path is not invocable as a Windows hook command; prefix node.
+    expect(bin).toBe('"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\u\\app\\codemie.js"');
+    expect(resolveHookCommand('codemie hook', bin)).toBe(
+      '"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\u\\app\\codemie.js" hook',
+    );
+    argvSpy.mockRestore();
+    platSpy.mockRestore();
+    execSpy.mockRestore();
+  });
+
+  it('resolveCodemieBinary: on non-Windows, a .js argv[1] fallback stays a bare path (shebang-executable)', async () => {
+    vi.doMock('../processes.js', () => ({ getCommandPath: vi.fn().mockResolvedValue(null) }));
+    const argvSpy = vi.spyOn(process, 'argv', 'get').mockReturnValue(['node', '/home/u/app/codemie.js']);
+    const platSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+    const { resolveCodemieBinary } = await import('../hook-command.js');
+    expect(await resolveCodemieBinary()).toBe('/home/u/app/codemie.js');
+    argvSpy.mockRestore();
+    platSpy.mockRestore();
+  });
+
   it('rewriteHooksCommandTree rewrites every command and reports change', async () => {
     const { rewriteHooksCommandTree } = await import('../hook-command.js');
     const hooks = {

@@ -67,4 +67,18 @@ describe('006-resolve-hook-command-paths', () => {
     expect(res2.success).toBe(true);
     expect(res2.migrated).toBe(false);
   });
+
+  it('returns success:false when a needed rewrite cannot be written (so the runner retries)', async () => {
+    await seedClaudeHooks(); // seeded with the real fs/promises before the mock below
+    vi.doMock('fs/promises', async (imp) => {
+      const actual = await imp<typeof import('fs/promises')>();
+      return { ...actual, writeFile: vi.fn().mockRejectedValue(Object.assign(new Error('EACCES'), { code: 'EACCES' })) };
+    });
+    const { RewriteHookCommandPathsMigration } = await import('../006-resolve-hook-command-paths.migration.js');
+    const res = await new RewriteHookCommandPathsMigration().up();
+    // success:false leaves the migration pending so it retries on the next launch,
+    // instead of being permanently recorded as applied with the hooks still broken.
+    expect(res.success).toBe(false);
+    expect(res.migrated).toBe(false);
+  });
 });

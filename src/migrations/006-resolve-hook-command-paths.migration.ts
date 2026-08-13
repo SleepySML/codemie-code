@@ -33,6 +33,7 @@ class RewriteHookCommandPathsMigration implements Migration {
     logger.info('[006-resolve-hook-command-paths] Starting installed-hook path rewrite');
 
     let migrated = false;
+    let anyWriteFailed = false;
     let binary: string | undefined;
 
     for (const file of this.hookFiles()) {
@@ -54,6 +55,11 @@ class RewriteHookCommandPathsMigration implements Migration {
           logger.info(`[006-resolve-hook-command-paths] Rewrote ${file}`);
           migrated = true;
         } catch (error) {
+          // A rewrite was needed but could not be persisted. Report failure so the
+          // MigrationRunner does NOT record this migration as applied — otherwise a
+          // transient write error (EACCES/EPERM/disk full) would leave the hooks
+          // broken forever with no retry. success:false keeps it pending.
+          anyWriteFailed = true;
           logger.warn(
             `[006-resolve-hook-command-paths] Failed to write ${file}: ${(error as Error)?.message ?? error}`,
           );
@@ -61,6 +67,9 @@ class RewriteHookCommandPathsMigration implements Migration {
       }
     }
 
+    if (anyWriteFailed) {
+      return { success: false, migrated, reason: 'write-failed' };
+    }
     return { success: true, migrated, reason: migrated ? undefined : 'nothing-to-rewrite' };
   }
 }
