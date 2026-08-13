@@ -71,4 +71,15 @@ describe('ClaudeRequestNormalizer — unsupported effort stripping', () => {
     expect(out.output_config).toBeUndefined();
     expect(out.messages).toEqual([{ role: 'user', content: 'hi' }]);
   });
+
+  it('leaves the thinking field of a standard (non-adaptive, non-none) model untouched', async () => {
+    // claude-4-5-sonnet resolves to DEFAULT_CAPABILITIES (thinking: "standard"),
+    // so an enabled thinking block must pass through unchanged (not transformed to adaptive).
+    const out = await run('claude-4-5-sonnet', {
+      thinking: { type: 'enabled', budget_tokens: 10000 },
+      messages: [],
+    });
+    expect(out.thinking).toEqual({ type: 'enabled', budget_tokens: 10000 });
+    expect(out.output_config).toBeUndefined();
+  });
 });
