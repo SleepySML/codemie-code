@@ -73,37 +73,37 @@ export function resolveHookCommand(command: string, binary: string): string {
   return command;
 }
 
-interface HookLeaf {
-  command?: unknown;
-}
-interface HookMatcherEntry {
-  hooks?: unknown;
-}
-
 /**
- * Walk a Claude/Gemini hooks tree (`{ EventName: [{ hooks: [{ command }] }] }`)
- * and rewrite every string `command` via {@link resolveHookCommand}.
- * Mutates in place. Returns true if any command changed.
+ * Recursively rewrite every string-valued `command` field found anywhere in a
+ * hooks structure via {@link resolveHookCommand}. Shape-agnostic: it handles the
+ * Claude/Gemini `{ EventName: [{ hooks: [{ command }] }] }` layout and any other
+ * nesting without hardcoding it. Mutates in place; returns true if anything changed.
  */
-export function rewriteHooksCommandTree(hooks: unknown, binary: string): boolean {
-  if (!hooks || typeof hooks !== 'object') return false;
+export function rewriteHooksCommandTree(node: unknown, binary: string): boolean {
+  if (Array.isArray(node)) {
+    let changed = false;
+    for (const item of node) {
+      if (rewriteHooksCommandTree(item, binary)) changed = true;
+    }
+    return changed;
+  }
 
-  let changed = false;
-  for (const entries of Object.values(hooks as Record<string, unknown>)) {
-    if (!Array.isArray(entries)) continue;
-    for (const entry of entries as HookMatcherEntry[]) {
-      const inner = entry?.hooks;
-      if (!Array.isArray(inner)) continue;
-      for (const leaf of inner as HookLeaf[]) {
-        if (typeof leaf.command === 'string') {
-          const next = resolveHookCommand(leaf.command, binary);
-          if (next !== leaf.command) {
-            leaf.command = next;
-            changed = true;
-          }
+  if (node && typeof node === 'object') {
+    const record = node as Record<string, unknown>;
+    let changed = false;
+    for (const [key, value] of Object.entries(record)) {
+      if (key === 'command' && typeof value === 'string') {
+        const next = resolveHookCommand(value, binary);
+        if (next !== value) {
+          record[key] = next;
+          changed = true;
         }
+      } else if (rewriteHooksCommandTree(value, binary)) {
+        changed = true;
       }
     }
+    return changed;
   }
-  return changed;
+
+  return false;
 }
