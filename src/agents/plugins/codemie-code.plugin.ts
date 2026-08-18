@@ -24,11 +24,8 @@ import { ensureSessionFile } from '../core/session/ensure-session.js';
  */
 export const BUILTIN_AGENT_NAME = 'codemie-code';
 
-/**
- * Build the always-present default hooks (session tracking + metrics), using an
- * absolute, PATH-independent codemie command so the OpenCode hook plugin can
- * invoke it regardless of the shell PATH. See EPMCDME-14035.
- */
+// Default session-tracking/metrics hooks, using an absolute codemie command so the
+// OpenCode hook plugin can invoke it regardless of shell PATH. See EPMCDME-14035.
 export function buildDefaultHooks(binary: string): Record<string, unknown[]> {
   const hookCommand = resolveHookCommand('codemie hook', binary);
   return {
@@ -309,8 +306,6 @@ export const CodeMieCodePluginMetadata: AgentMetadata = {
       });
 
       // --- Hooks injection ---
-      // 1. Build default hooks (always present for session tracking + metrics).
-      // Resolve an absolute codemie path so hooks don't depend on the hook-shell PATH.
       const codemieBinary = await resolveCodemieBinary();
       const defaultHooks: Record<string, unknown[]> = buildDefaultHooks(codemieBinary);
 

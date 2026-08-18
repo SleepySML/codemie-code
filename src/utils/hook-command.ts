@@ -1,21 +1,11 @@
 /**
- * Shared codemie hook-command path resolver.
- *
- * Claude Code / Gemini / codemie-code hooks invoke the `codemie` CLI. When the
- * hook shell's PATH does not contain the codemie bin directory (e.g. a
- * user-prefix install without admin rights), a bare `codemie hook` fails with
- * `codemie: command not found`. This module resolves an absolute, directly
- * invocable command prefix so hooks no longer depend on PATH.
- *
- * See EPMCDME-14035.
+ * Resolves an absolute, PATH-independent `codemie` command prefix for hooks, so a
+ * bare `codemie hook` no longer fails with `command not found` when the hook
+ * shell's PATH lacks the codemie bin dir. See EPMCDME-14035.
  */
 import { getCommandPath } from './processes.js';
 
-/**
- * Special characters that require the command path to be quoted before it is
- * embedded in a shell command string. Mirrors the class used in
- * BaseAgentAdapter for Windows command-path quoting.
- */
+// Shell-special chars that force the command path to be quoted; mirrors BaseAgentAdapter.
 const NEEDS_QUOTING = /[ \t,;=()&|<>^%[\]{}]/;
 
 function quoteIfNeeded(p: string): string {
@@ -26,33 +16,20 @@ function alwaysQuote(p: string): string {
   return p.startsWith('"') ? p : `"${p}"`;
 }
 
-/**
- * Resolve an absolute, directly-invocable command prefix for the codemie CLI.
- *
- * Preference order:
- * 1. PATH-resolved shim/symlink via `getCommandPath('codemie')` (directly
- *    executable on all platforms).
- * 2. The running entry `process.argv[1]` (the codemie.js being executed).
- * 3. The literal `codemie` (today's behavior — last resort).
- *
- * The result is quoted when it contains whitespace or shell-special characters.
- */
+// Prefer the PATH-resolved shim, then the running entry (argv[1]), then bare `codemie`.
+// Never throws — it runs in launch-critical hook paths, so errors degrade to the next fallback.
 export async function resolveCodemieBinary(): Promise<string> {
-  // Resolution must never throw — it runs in agent beforeRun/hook paths where a
-  // failure would break launch. Any error degrades to the next fallback.
   try {
     const resolved = await getCommandPath('codemie');
     if (resolved) return quoteIfNeeded(resolved);
   } catch {
-    // fall through to argv[1] / bare command
+    // fall through
   }
 
   const argv1 = process.argv[1];
   if (argv1) {
-    // On Windows a raw .js entry path is not directly invocable as a hook command
-    // (cmd.exe needs a `node` prefix); on Unix argv[1] runs via its shebang.
-    // Always quote both tokens here — a `node <script>` invocation must survive
-    // spaces in either path (e.g. "C:\Program Files\nodejs\node.exe").
+    // A Windows .js argv[1] is not directly invocable as a hook command — cmd.exe
+    // needs a `node` prefix; both tokens are quoted to survive spaces.
     if (process.platform === 'win32' && /\.[cm]?js$/i.test(argv1)) {
       return `${alwaysQuote(process.execPath)} ${alwaysQuote(argv1)}`;
     }
@@ -62,23 +39,15 @@ export async function resolveCodemieBinary(): Promise<string> {
   return 'codemie';
 }
 
-/**
- * Rewrite a hook command's leading `codemie` token to `binary`.
- * Commands that are not the codemie CLI (or already absolute) are returned
- * unchanged.
- */
+// Rewrite a leading `codemie` token to `binary`; other commands pass through.
 export function resolveHookCommand(command: string, binary: string): string {
   if (command === 'codemie') return binary;
   if (command.startsWith('codemie ')) return binary + command.slice('codemie'.length);
   return command;
 }
 
-/**
- * Recursively rewrite every string-valued `command` field found anywhere in a
- * hooks structure via {@link resolveHookCommand}. Shape-agnostic: it handles the
- * Claude/Gemini `{ EventName: [{ hooks: [{ command }] }] }` layout and any other
- * nesting without hardcoding it. Mutates in place; returns true if anything changed.
- */
+// Recursively rewrite every string `command` field anywhere in a hooks structure.
+// Shape-agnostic (no hardcoded layout). Mutates in place; returns true if anything changed.
 export function rewriteHooksCommandTree(node: unknown, binary: string): boolean {
   if (Array.isArray(node)) {
     let changed = false;

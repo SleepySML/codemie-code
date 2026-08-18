@@ -1,63 +1,26 @@
 /**
- * Claude Request Normalizer Plugin
- * Priority: 14 (runs before RequestSanitizer at 15)
- *
- * Normalizes Claude API requests to match model-specific requirements. Every
- * model-specific decision is driven by a single source of truth —
- * MODEL_CAPABILITY_TABLE — rather than scattered per-behavior regexes:
- *
- * 1. `thinking: 'none'`  → strip the thinking field entirely (models that reject
- *    it with HTTP 400, e.g. claude-haiku-3-5 / 4-5).
- * 2. `thinking: 'adaptive'` → transform `thinking.type` "enabled" into
- *    { type: "adaptive" } + output_config.effort; "disabled" is preserved or
- *    deleted per `preserveDisabledThinking` (e.g. claude-opus-4-7+, claude-sonnet-5).
- * 3. `sampling: false` → strip temperature / top_p / top_k (e.g. claude-sonnet-5).
- * 4. `effort: false` → strip output_config.effort and any top-level effort, so a
- *    model that rejects it (e.g. claude-4-5-sonnet) does not 400 with
- *    "This model does not support the effort parameter".
- *
- * Problem: Claude Code sends `thinking: { type: "enabled", budget_tokens: N }`
- * and, from its `--effort` flag, an `effort` parameter — neither of which every
- * model accepts.
- *
- * Scope: Enabled for codemie-claude (Claude Code via SSO proxy), codemie-copilot
- * (GitHub Copilot CLI via BYOK Anthropic shape), and claude-desktop (Desktop 3P mode).
- *
- * To add or change model support: add/edit a row in MODEL_CAPABILITY_TABLE. The
- * handlers below read the resolved capabilities — they never test model names.
+ * Normalizes Claude API requests per model. Every model-specific decision reads
+ * from MODEL_CAPABILITY_TABLE; add/edit a row to change support. Priority 14
+ * (before RequestSanitizer at 15). See EPMCDME-14035.
  */
 
 import { ProxyPlugin, PluginContext, ProxyInterceptor } from './types.js';
 import { ProxyContext } from '../proxy-types.js';
 import { logger } from '../../../../../utils/logger.js';
 
-/**
- * How a model handles the `thinking` field:
- * - `standard`  — leave it untouched (legacy models, e.g. claude-4-5-sonnet).
- * - `none`      — the model rejects thinking; strip it.
- * - `adaptive`  — the model requires the adaptive thinking API + output_config.effort.
- */
+// standard = leave thinking untouched; none = strip it; adaptive = requires the
+// adaptive thinking API + output_config.effort.
 type ThinkingMode = 'standard' | 'none' | 'adaptive';
 
-/**
- * Per-model normalization capabilities — the single source of truth for every
- * model-specific decision this plugin makes.
- */
 interface ModelCapabilities {
-  /** How the model handles the `thinking` field. */
   thinking: ThinkingMode;
-  /** Whether the model accepts the effort parameter (output_config.effort / top-level effort). */
   effort: boolean;
-  /** Whether the model accepts sampling parameters (temperature / top_p / top_k). */
   sampling: boolean;
   /** Adaptive models only: keep `thinking.type: "disabled"` instead of deleting it. */
   preserveDisabledThinking: boolean;
 }
 
-/**
- * Applied when no MODEL_CAPABILITY_TABLE row matches: the model handles thinking
- * the legacy way, does not support effort, and accepts sampling params.
- */
+// Applied when no MODEL_CAPABILITY_TABLE row matches.
 const DEFAULT_CAPABILITIES: ModelCapabilities = {
   thinking: 'standard',
   effort: false,
@@ -65,11 +28,8 @@ const DEFAULT_CAPABILITIES: ModelCapabilities = {
   preserveDisabledThinking: false,
 };
 
-/**
- * Model-name pattern → capabilities. First match wins. Extend this table as
- * Anthropic migrates additional models — see EPMCDME-11821 / EPMCDME-14035.
- * Patterns use `(?:[^0-9]|$)` after the version so e.g. `4-7` does not match `4-70`.
- */
+// Pattern → capabilities, first match wins. The `(?:[^0-9]|$)` after each version
+// stops `4-7` from matching `4-70`. See EPMCDME-11821 / EPMCDME-14035.
 const MODEL_CAPABILITY_TABLE: ReadonlyArray<{ pattern: RegExp; capabilities: ModelCapabilities }> = [
   {
     // claude-haiku-3-5 / 4-5 (+ date-tagged): no extended thinking at all.
@@ -96,12 +56,7 @@ function capabilitiesFor(model: string): ModelCapabilities {
   return DEFAULT_CAPABILITIES;
 }
 
-/**
- * Map legacy budget_tokens to the closest output_config.effort level.
- *
- * budget_tokens was the maximum token budget for thinking in the old API.
- * effort is a coarser control in the new API: low / medium / high.
- */
+// Map legacy budget_tokens to the coarser new-API effort level.
 function budgetTokensToEffort(budgetTokens: unknown): 'low' | 'medium' | 'high' {
   const tokens = typeof budgetTokens === 'number' ? budgetTokens : 0;
   if (tokens <= 2048) return 'low';
@@ -109,10 +64,7 @@ function budgetTokensToEffort(budgetTokens: unknown): 'low' | 'medium' | 'high' 
   return 'high';
 }
 
-/**
- * Handler: normalize the `thinking` field per the model's ThinkingMode.
- * Only called when `body.thinking` is present. Returns true if the body changed.
- */
+// Normalize the thinking field per caps.thinking. Called only when body.thinking is set.
 function handleThinkingField(body: any, caps: ModelCapabilities, model: string): boolean {
   if (caps.thinking === 'none') {
     delete body.thinking;
@@ -155,12 +107,8 @@ function handleThinkingField(body: any, caps: ModelCapabilities, model: string):
   return false;
 }
 
-/**
- * Handler: strips the `effort` parameter for models whose capabilities say they
- * do not support it. Newer Claude Code translates its `--effort` CLI flag into
- * `output_config.effort` (or a top-level `effort`); models like claude-4-5-sonnet
- * reject it with HTTP 400. Returns true if anything was stripped.
- */
+// Strip effort for models that reject it: Claude Code's --effort flag becomes
+// output_config.effort (or top-level effort) and 400s on e.g. claude-4-5-sonnet.
 function handleUnsupportedEffort(body: any, caps: ModelCapabilities, model: string): boolean {
   if (caps.effort) {
     return false;
@@ -188,10 +136,7 @@ function handleUnsupportedEffort(body: any, caps: ModelCapabilities, model: stri
   return stripped;
 }
 
-/**
- * Handler: strips deprecated sampling params for models that reject them.
- * Returns true if anything was stripped.
- */
+// Strip sampling params (temperature/top_p/top_k) for models that reject them.
 function handleDeprecatedSamplingParams(body: any, caps: ModelCapabilities, model: string): boolean {
   if (caps.sampling) {
     return false;
@@ -215,7 +160,6 @@ function handleDeprecatedSamplingParams(body: any, caps: ModelCapabilities, mode
   return true;
 }
 
-/** Agents whose Claude API requests need thinking normalization */
 const ALLOWED_AGENTS = ['codemie-claude', 'codemie-copilot', 'claude-desktop'];
 
 export class ClaudeRequestNormalizerPlugin implements ProxyPlugin {
@@ -229,7 +173,6 @@ export class ClaudeRequestNormalizerPlugin implements ProxyPlugin {
     if (!clientType || !ALLOWED_AGENTS.includes(clientType)) {
       throw new Error(`Plugin disabled for agent: ${clientType}`);
     }
-    // Pass the configured model as a fallback for requests that omit body.model
     const configModel = context.config.model;
     return new ClaudeRequestNormalizerInterceptor(configModel);
   }
@@ -258,8 +201,7 @@ class ClaudeRequestNormalizerInterceptor implements ProxyInterceptor {
 
       const modifiedBySampling = handleDeprecatedSamplingParams(body, caps, model);
 
-      // Runs regardless of body.thinking — Claude Code can send `effort` without
-      // a thinking field, so this must not sit behind the thinking guard below.
+      // Not behind the thinking guard: Claude Code can send effort without thinking.
       const modifiedByEffort = handleUnsupportedEffort(body, caps, model);
 
       let modifiedByThinking = false;

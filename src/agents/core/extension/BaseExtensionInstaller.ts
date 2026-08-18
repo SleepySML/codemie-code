@@ -517,11 +517,8 @@ export abstract class BaseExtensionInstaller {
     }
   }
 
-  /**
-   * Rewrite the installed hooks.json commands to an absolute, PATH-independent
-   * codemie binary path. Non-fatal: any failure logs and leaves the copied file
-   * as-is so installation never breaks. See EPMCDME-14035.
-   */
+  // Rewrite installed hooks.json commands to an absolute codemie path. Non-fatal:
+  // failures log and leave the copied file as-is so install never breaks. EPMCDME-14035.
   protected async localizeInstalledHooks(targetPath: string): Promise<void> {
     try {
       const { resolveCodemieBinary, rewriteHooksCommandTree } = await import('../../../utils/hook-command.js');
@@ -697,8 +694,6 @@ export abstract class BaseExtensionInstaller {
           };
         }
 
-        // Localize hook commands to an absolute codemie path so hooks do not
-        // depend on the (possibly minimal) hook-shell PATH. See EPMCDME-14035.
         await this.localizeInstalledHooks(targetPath);
       } else {
         logger.info(`[${this.agentName}] Skipping copy - extension already up-to-date`);

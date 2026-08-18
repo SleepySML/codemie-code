@@ -7,17 +7,8 @@ import { resolveCodemieBinary, rewriteHooksCommandTree } from '../utils/hook-com
 import { getCodemiePath } from '../utils/paths.js';
 import { logger } from '../utils/logger.js';
 
-/**
- * Migration 006: Rewrite installed hook commands to the absolute codemie path.
- *
- * Installed Claude/Gemini hook files historically used a bare `codemie` command,
- * which fails with `codemie: command not found` when the hook shell's PATH does
- * not contain the codemie bin directory (e.g. a user-prefix install without
- * admin rights). This one-time migration localizes existing installs so users
- * on the fixed version are repaired even if their plugin version did not bump.
- *
- * See EPMCDME-14035.
- */
+// Repairs already-installed Claude/Gemini hooks whose bare `codemie` command fails
+// with `command not found`, for users whose plugin version did not bump. See EPMCDME-14035.
 class RewriteHookCommandPathsMigration implements Migration {
   id = '006-resolve-hook-command-paths';
   description = 'Rewrite installed Claude/Gemini hook commands to the absolute codemie path';
@@ -56,10 +47,8 @@ class RewriteHookCommandPathsMigration implements Migration {
           logger.info(`[006-resolve-hook-command-paths] Rewrote ${file}`);
           migrated = true;
         } catch (error) {
-          // A rewrite was needed but could not be persisted. Report failure so the
-          // MigrationRunner does NOT record this migration as applied — otherwise a
-          // transient write error (EACCES/EPERM/disk full) would leave the hooks
-          // broken forever with no retry. success:false keeps it pending.
+          // success:false keeps the migration pending so a transient write error
+          // (EACCES/EPERM/disk full) is retried, not recorded as applied forever.
           anyWriteFailed = true;
           logger.warn(
             `[006-resolve-hook-command-paths] Failed to write ${file}: ${(error as Error)?.message ?? error}`,
@@ -75,8 +64,5 @@ class RewriteHookCommandPathsMigration implements Migration {
   }
 }
 
-// Auto-register the migration
 MigrationRegistry.register(new RewriteHookCommandPathsMigration());
-
-// Export for testing
 export { RewriteHookCommandPathsMigration };
