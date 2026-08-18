@@ -4,6 +4,7 @@ import { homedir } from 'os';
 import type { Migration, MigrationResult } from './types.js';
 import { MigrationRegistry } from './registry.js';
 import { resolveCodemieBinary, rewriteHooksCommandTree } from '../utils/hook-command.js';
+import { getCodemiePath } from '../utils/paths.js';
 import { logger } from '../utils/logger.js';
 
 /**
@@ -24,7 +25,7 @@ class RewriteHookCommandPathsMigration implements Migration {
 
   private hookFiles(): string[] {
     return [
-      path.join(homedir(), '.codemie', 'claude-plugin', 'hooks', 'hooks.json'),
+      getCodemiePath('claude-plugin', 'hooks', 'hooks.json'),
       path.join(homedir(), '.gemini', 'extensions', 'codemie', 'hooks', 'hooks.json'),
     ];
   }
