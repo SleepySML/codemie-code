@@ -6,7 +6,7 @@
 
 **Architecture:**
 - **Bug 1 (hook path):** A shared resolver rewrites hook commands to use the absolute, directly-invocable codemie path. It runs at install time (post-copy in `BaseExtensionInstaller.install()`, covering Claude + Gemini), at codemie-code inline-hook construction (`OPENCODE_HOOKS`), and via a one-time startup migration (006) for already-installed users.
-- **Bug 2 (effort):** Add a handler to the Claude request-normalizer proxy plugin that strips `effort` (`output_config.effort` and top-level `effort`) for models that do **not** support the adaptive-thinking/effort API, gated by the existing `ADAPTIVE_THINKING_MODEL_PATTERNS`.
+- **Bug 2 (effort):** Add a handler to the Claude request-normalizer proxy plugin that strips `effort` (`output_config.effort` and top-level `effort`) for models that do **not** support the adaptive-thinking/effort API. Model gating is consolidated into a single `MODEL_CAPABILITY_TABLE` (pattern → `ModelCapabilities { thinking, effort, sampling, preserveDisabledThinking }`); `capabilitiesFor(model)` returns the matching row or `DEFAULT_CAPABILITIES` (`{ thinking: 'standard', effort: false, sampling: true }`), and the effort handler strips when `caps.effort === false`. This replaces the earlier separate `NO_THINKING_MODEL_PATTERNS` / `ADAPTIVE_THINKING_MODEL_PATTERNS` regex lists.
 
 **Tech Stack:** TypeScript (ESM, NodeNext), Node ≥ 20, Vitest, existing plugin/installer/migration frameworks in `codemie-code`.
 
@@ -45,7 +45,7 @@
 - Produces:
   - `resolveCodemieBinary(): Promise<string>` — an absolute, directly-invocable command prefix for the codemie CLI (e.g. `/usr/local/bin/codemie`, already quoted if it contains whitespace/special chars). Falls back to `process.argv[1]` then the literal `codemie`.
   - `resolveHookCommand(command: string, binary: string): string` — if `command` is `codemie` or begins with `codemie ` (the token), replace that leading token with `binary`; otherwise return `command` unchanged.
-  - `rewriteHooksCommandTree(hooks: unknown, binary: string): boolean` — walk a Claude/Gemini `hooks` object (`{ SessionStart: [{ hooks: [{ type, command }] }], ... }`), applying `resolveHookCommand` to every string `command`. Mutates in place; returns `true` if any command changed.
+  - `rewriteHooksCommandTree(node: unknown, binary: string): boolean` — recursively walk any hooks structure (arrays and objects at any depth), applying `resolveHookCommand` to every string-valued `command` field wherever it appears. Shape-agnostic: it handles the Claude/Gemini `{ SessionStart: [{ hooks: [{ type, command }] }], ... }` layout without hardcoding it. Mutates in place; returns `true` if any command changed.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -143,25 +143,36 @@ export function resolveHookCommand(command: string, binary: string): string {
   return command;
 }
 
-/** Walk a Claude/Gemini hooks tree and rewrite every command string. Returns true if anything changed. */
-export function rewriteHooksCommandTree(hooks: unknown, binary: string): boolean {
-  if (!hooks || typeof hooks !== 'object') return false;
-  let changed = false;
-  for (const entries of Object.values(hooks as Record<string, unknown>)) {
-    if (!Array.isArray(entries)) continue;
-    for (const entry of entries) {
-      const inner = (entry as { hooks?: unknown })?.hooks;
-      if (!Array.isArray(inner)) continue;
-      for (const h of inner) {
-        const hook = h as { command?: unknown };
-        if (typeof hook.command === 'string') {
-          const next = resolveHookCommand(hook.command, binary);
-          if (next !== hook.command) { hook.command = next; changed = true; }
-        }
+/**
+ * Recursively rewrite every string-valued `command` field found anywhere in a
+ * hooks structure via resolveHookCommand. Shape-agnostic: handles the
+ * Claude/Gemini `{ EventName: [{ hooks: [{ command }] }] }` layout and any other
+ * nesting without hardcoding it. Mutates in place; returns true if anything changed.
+ */
+export function rewriteHooksCommandTree(node: unknown, binary: string): boolean {
+  if (Array.isArray(node)) {
+    let changed = false;
+    for (const item of node) {
+      if (rewriteHooksCommandTree(item, binary)) changed = true;
+    }
+    return changed;
+  }
+
+  if (node && typeof node === 'object') {
+    const record = node as Record<string, unknown>;
+    let changed = false;
+    for (const [key, value] of Object.entries(record)) {
+      if (key === 'command' && typeof value === 'string') {
+        const next = resolveHookCommand(value, binary);
+        if (next !== value) { record[key] = next; changed = true; }
+      } else if (rewriteHooksCommandTree(value, binary)) {
+        changed = true;
       }
     }
+    return changed;
   }
-  return changed;
+
+  return false;
 }
 ```
 
@@ -484,8 +495,8 @@ git commit -m "fix(hooks): add migration to fix already-installed hook command p
 - Test: `src/providers/plugins/sso/proxy/plugins/__tests__/claude-request-normalizer.plugin.test.ts` (append cases)
 
 **Interfaces:**
-- Consumes: existing `modelRequiresAdaptiveThinking(model)`.
-- Produces: `handleUnsupportedEffort(body: any, model: string): boolean` — for models NOT matching `ADAPTIVE_THINKING_MODEL_PATTERNS`, deletes `body.output_config.effort` (and `body.output_config` if it becomes empty) and any top-level `body.effort`; returns `true` if anything was stripped.
+- Consumes: `capabilitiesFor(model): ModelCapabilities` from the consolidated `MODEL_CAPABILITY_TABLE` (first-match-wins; falls back to `DEFAULT_CAPABILITIES`). The thinking/sampling handlers are refactored to take the same `caps` object so every model decision reads from one source of truth.
+- Produces: `handleUnsupportedEffort(body: any, caps: ModelCapabilities, model: string): boolean` — no-op when `caps.effort === true`; otherwise deletes `body.output_config.effort` (and `body.output_config` if it becomes empty) and any top-level `body.effort`; returns `true` if anything was stripped.
 
 - [ ] **Step 1: Write the failing test** (append to the existing describe block)
 
@@ -543,9 +554,9 @@ Expected: FAIL — effort still present for sonnet cases.
 Add the handler:
 
 ```ts
-function handleUnsupportedEffort(body: any, model: string): boolean {
-  if (modelRequiresAdaptiveThinking(model)) {
-    return false; // adaptive models legitimately accept effort
+function handleUnsupportedEffort(body: any, caps: ModelCapabilities, model: string): boolean {
+  if (caps.effort) {
+    return false; // models whose capabilities allow effort legitimately accept it
   }
   let stripped = false;
   const oc = body.output_config;
@@ -559,23 +570,23 @@ function handleUnsupportedEffort(body: any, model: string): boolean {
     stripped = true;
   }
   if (stripped) {
-    logger.debug(`[claude-request-normalizer] Stripped unsupported effort for model: ${model}`);
+    logger.debug(`[claude-request-normalizer] Stripped unsupported effort parameter for model: ${model}`);
   }
   return stripped;
 }
 ```
 
-Wire it in `onRequest` (runs regardless of `body.thinking`, since Claude Code can send `effort` without `thinking`):
+Wire it in `onRequest` (runs regardless of `body.thinking`, since Claude Code can send `effort` without `thinking`). Resolve `caps` once and pass it to every handler:
 
 ```ts
-const modifiedBySampling = handleDeprecatedSamplingParams(body, model);
-const modifiedByEffort = handleUnsupportedEffort(body, model);
+const caps = capabilitiesFor(model);
+
+const modifiedBySampling = handleDeprecatedSamplingParams(body, caps, model);
+const modifiedByEffort = handleUnsupportedEffort(body, caps, model);
 
 let modifiedByThinking = false;
 if (body.thinking) {
-  modifiedByThinking =
-    handleNoThinkingModels(body, model) ||
-    handleAdaptiveThinkingTransform(body, model);
+  modifiedByThinking = handleThinkingField(body, caps, model);
 }
 
 if (modifiedBySampling || modifiedByEffort || modifiedByThinking) {
@@ -585,7 +596,7 @@ if (modifiedBySampling || modifiedByEffort || modifiedByThinking) {
 }
 ```
 
-Also update the plugin's top-of-file doc comment to mention the effort-stripping behavior for non-adaptive models.
+The thinking normalization is consolidated into a single `handleThinkingField(body, caps, model)` that branches on `caps.thinking` (`none` → strip; `adaptive` → enabled→adaptive+effort, disabled→preserve-or-strip per `caps.preserveDisabledThinking`; `standard` → leave untouched), replacing the former `handleNoThinkingModels` / `handleAdaptiveThinkingTransform` pair. Also update the plugin's top-of-file doc comment to describe the capability table and the effort-stripping behavior for non-adaptive models.
 
 - [ ] **Step 4: Run test to verify it passes**
 
