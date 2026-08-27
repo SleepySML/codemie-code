@@ -172,11 +172,14 @@ function extractFileContentFromMessages(messages: ClaudeMessage[]): DetectedFile
     return [];
   }
 
-  // Step 2: collect all isMeta messages that share the anchor's promptId.
-  // In real Claude Code JSONL the base64 data and the [Image: source:] filename
-  // text live in separate isMeta entries — both carry the same promptId.
+  // Step 2: collect every message of the current prompt turn (all entries sharing the
+  // anchor's promptId), regardless of isMeta. Claude Code stores the base64 image in the
+  // NON-meta user message (with an "[Image #N]" marker) while the "[Image: source: /path]"
+  // filename text lives in a separate isMeta message of the same promptId (observed on
+  // Claude Code 2.1.218). Filtering to isMeta only would drop the base64 and detect nothing.
+  // promptId still bounds detection to the current turn (earlier turns are not re-sent).
   const promptMessages = messages.filter(
-    msg => msg.isMeta && msg.promptId === anchorPromptId && Array.isArray(msg.message?.content)
+    msg => msg.promptId === anchorPromptId && Array.isArray(msg.message?.content)
   );
 
   // Step 3: gather every filename annotation across all those messages first.

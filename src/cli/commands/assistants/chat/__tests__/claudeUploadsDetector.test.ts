@@ -454,6 +454,60 @@ describe('fileResolver', () => {
         expect(result).toEqual([]);
       });
 
+      it('should detect image when base64 is in a NON-meta message and [Image: source:] text is in an isMeta message of the same promptId (real Claude Code 2.1.218 structure)', async () => {
+        vi.mocked(existsSync).mockReturnValue(true);
+        const mockSession: Session = {
+          id: mockSessionId,
+          correlation: {
+            status: 'matched',
+            agentSessionFile: mockAgentSessionFile
+          }
+        } as Session;
+        vi.mocked(readFileSync).mockReturnValue(JSON.stringify(mockSession));
+
+        // Claude Code 2.1.218 real structure: the NON-meta user message carries the
+        // base64 image (with an "[Image #N]" marker); a separate isMeta message of the
+        // same promptId carries the "[Image: source: /path]" filename text (no base64).
+        const base64Data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ';
+        const messages: ClaudeMessage[] = [
+          {
+            type: 'user',
+            uuid: 'nonmeta-img',
+            promptId: 'prompt-real',
+            sessionId: mockSessionId,
+            timestamp: '2024-01-01T00:00:00Z',
+            message: {
+              role: 'user',
+              content: [
+                { type: 'text', text: '[Image #1]' },
+                { type: 'image', source: { type: 'base64', media_type: 'image/png', data: base64Data } }
+              ]
+            }
+          } as ClaudeMessage,
+          {
+            type: 'user',
+            uuid: 'meta-name',
+            promptId: 'prompt-real',
+            parentUuid: 'nonmeta-img',
+            sessionId: mockSessionId,
+            timestamp: '2024-01-01T00:00:01Z',
+            isMeta: true,
+            message: {
+              role: 'user',
+              content: [{ type: 'text', text: '[Image: source: /Users/x/.claude/image-cache/s/1.png]' }]
+            }
+          } as ClaudeMessage
+        ];
+        vi.mocked(readJSONL).mockResolvedValue(messages);
+
+        const result = await detectFileUploadsFromSession(mockSessionId);
+
+        expect(result).toHaveLength(1);
+        expect(result[0].fileName).toBe('1.png');
+        expect(result[0].data).toBe(base64Data);
+        expect(result[0].mediaType).toBe('image/png');
+      });
+
       it('should detect image when base64 and filename are in separate isMeta messages sharing the same promptId (Bug B)', async () => {
         vi.mocked(existsSync).mockReturnValue(true);
         const mockSession: Session = {
