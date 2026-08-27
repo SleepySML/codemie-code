@@ -16,15 +16,17 @@ import { basename, join } from 'path';
 import chalk from 'chalk';
 import { logger } from '@/utils/logger.js';
 import { readJSONLTolerant } from '@/agents/core/session/utils/jsonl-reader.js';
-import { getCodexDiscoverySessionRoots } from '@/agents/plugins/codex/codex.paths.js';
-import { isCodexInjectedUserText } from '@/agents/plugins/codex/session/codex-user-prompt.js';
+import {
+  getCodexDiscoverySessionRoots,
+  isCodexInjectedUserText,
+} from '@/agents/plugins/codex/index.js';
 import type {
   CodexRolloutRecord,
   CodexSessionMeta,
   CodexEventMsg,
   CodexResponseItemMessage,
   CodexContentBlock,
-} from '@/agents/plugins/codex/codex-message-types.js';
+} from '@/agents/plugins/codex/index.js';
 import type { DetectedFile } from './claudeUploadsDetector.js';
 
 const LOG_PREFIX = '[codexUploadsDetector]';
