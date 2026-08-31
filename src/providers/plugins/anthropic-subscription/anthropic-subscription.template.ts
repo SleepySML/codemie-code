@@ -101,7 +101,8 @@ export const AnthropicSubscriptionTemplate = registerProvider<ProviderTemplate>(
         // -m/--model this launch) — never from the stored profile, so a pre-existing
         // profile's stale model is ignored. Claude Code owns entitlement/refusal.
         const cliModel = process.env.CODEMIE_CLI_MODEL;
-        if (cliModel && !result.includes('--model')) {
+        const hasModelFlag = result.some(arg => arg === '--model' || arg.startsWith('--model='));
+        if (cliModel && !hasModelFlag) {
           result = ['--model', cliModel, ...result];
         }
 
