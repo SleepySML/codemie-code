@@ -29,6 +29,7 @@ import {
 } from './lifecycle-helpers.js';
 import { redactSecrets } from './config-redaction.js';
 import { newerVersionPromptDefault, olderSupportedModelNote } from './version-prompt-policy.js';
+import { resolveLaunchModelDisplay } from './launch-model-display.js';
 import { extractGeneratedConfig } from './print-config.js';
 import inquirer from 'inquirer';
 
@@ -573,7 +574,7 @@ export abstract class BaseAgentAdapter implements AgentAdapter {
       const profileName = env.CODEMIE_PROFILE_NAME || 'default';
       const provider = env.CODEMIE_PROVIDER || 'unknown';
       const cliVersion = env.CODEMIE_CLI_VERSION || 'unknown';
-      const model = env.CODEMIE_MODEL || 'unknown';
+      const model = resolveLaunchModelDisplay(provider, env.CODEMIE_MODEL, process.env.CODEMIE_CLI_MODEL);
       const codeMieUrl = env.CODEMIE_URL;
 
       // Display ASCII logo with configuration
