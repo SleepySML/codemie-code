@@ -10,6 +10,7 @@ import { AuthMethod, ProviderName } from '../../providers/core/types.js';
 import { JWTTemplate } from '../../providers/plugins/jwt/jwt.template.js';
 import { logger } from '../../utils/logger.js';
 import { getDirname } from '../../utils/paths.js';
+import { applyCliModelEnv } from './cli-model-env.js';
 import { BUILTIN_AGENT_NAME } from '../registry.js';
 import { ClaudePluginMetadata } from '../plugins/claude/claude.plugin.js';
 import { CodeMieCodePluginMetadata } from '../plugins/codemie-code.plugin.js';
@@ -203,11 +204,10 @@ export class AgentCLI {
       });
 
       // Record the explicitly-requested CLI model so the anthropic-subscription
-      // provider can pass it through to Claude Code. Only set when the user passed
-      // -m/--model this launch (options.model), never from the stored profile.
-      if (typeof options.model === 'string' && options.model.trim() !== '') {
-        process.env.CODEMIE_CLI_MODEL = options.model.trim();
-      }
+      // provider can pass it through to Claude Code. Clears any pre-existing value
+      // first, so it reflects ONLY this launch's -m/--model, never a stale shell
+      // value or the stored profile.
+      applyCliModelEnv(options.model);
 
       // JWT token from CLI overrides everything
       if (options.jwtToken) {
