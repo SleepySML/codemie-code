@@ -28,6 +28,7 @@ import {
   executeAfterRun
 } from './lifecycle-helpers.js';
 import { redactSecrets } from './config-redaction.js';
+import { newerVersionPromptDefault, olderSupportedModelNote } from './version-prompt-policy.js';
 import { extractGeneratedConfig } from './print-config.js';
 import inquirer from 'inquirer';
 
@@ -393,6 +394,9 @@ export abstract class BaseAgentAdapter implements AgentAdapter {
     if (this.metadata.supportedVersion) {
       const compat = await this.checkVersionCompatibility();
 
+      // Provider drives the subscription-scoped softening of the version prompt.
+      const provider = envOverrides?.CODEMIE_PROVIDER;
+
       // Scenario 0: Version is below minimum supported — hard block, no override
       if (compat.isBelowMinimum) {
         const installedDisplay = compat.installedVersion ?? 'unknown';
@@ -462,7 +466,9 @@ export abstract class BaseAgentAdapter implements AgentAdapter {
               { name: 'Continue with current version', value: 'continue' },
               { name: 'Exit', value: 'exit' },
             ],
-            default: 'install',
+            // Subscription profiles default to keeping the installed newer version
+            // (never downgrade a binary the user's newer models depend on).
+            default: newerVersionPromptDefault(provider),
           },
         ]);
 
@@ -487,6 +493,12 @@ export abstract class BaseAgentAdapter implements AgentAdapter {
         console.log(chalk.white(`   Current version: v${compat.installedVersion}`));
         console.log(chalk.white(`   Latest version:  v${compat.supportedVersion} `) + chalk.green('(recommended)'));
         console.log();
+
+        const olderNote = olderSupportedModelNote(provider);
+        if (olderNote) {
+          console.log(chalk.white(`   ${olderNote}`));
+          console.log();
+        }
 
         const { updateChoice } = await inquirer.prompt([
           {
