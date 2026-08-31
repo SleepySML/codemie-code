@@ -202,6 +202,13 @@ export class AgentCLI {
         reasoningEffort: options.reasoningEffort as import('./types.js').CanonicalReasoningEffort | undefined,
       });
 
+      // Record the explicitly-requested CLI model so the anthropic-subscription
+      // provider can pass it through to Claude Code. Only set when the user passed
+      // -m/--model this launch (options.model), never from the stored profile.
+      if (typeof options.model === 'string' && options.model.trim() !== '') {
+        process.env.CODEMIE_CLI_MODEL = options.model.trim();
+      }
+
       // JWT token from CLI overrides everything
       if (options.jwtToken) {
         process.env.CODEMIE_JWT_TOKEN = options.jwtToken as string;
