@@ -87,7 +87,7 @@ Live entitlement-backed model catalog; supported-version refresh cadence / wheth
 ## Risks & mitigations
 
 - **Shared env pipeline regression** → confine changes to the subscription template + the provider-guarded branches in `BaseAgentAdapter`/`models.ts`; never touch `transformEnvVars`/`exportProviderEnvVars`/`collectPassThroughArgs`. `model-tier-e2e.test.ts` is the regression guard for the non-subscription env path.
-- **Double `--model`** → dedup guard checks `args.includes('--model')` before injecting (mirrors `--plugin-dir`).
+- **Double `--model`** → dedup guard checks for both `--model` and the `--model=` equals-form before injecting (mirrors `--plugin-dir`). The equals-form is reachable only via raw passthrough after `--` (e.g. `-m X -- --model=Y`); found and closed during manual edge-case verification.
 - **`moonshot-subscription` drift** → only `anthropic-subscription.template.ts` is edited; test 2 guards it.
 - **Provider not readable at version branch** → mitigated: `envOverrides` carries `CODEMIE_PROVIDER` (AgentCLI:461 → run()).
 - **No automated coverage for new behaviors** → addressed by the test plan above (D4).
