@@ -219,6 +219,13 @@ describe('AnthropicSubscriptionTemplate', () => {
       expect(enrich(['--model', 'claude-haiku-4-5'])).toEqual(['--model', 'claude-haiku-4-5']);
     });
 
+    it('does not double-inject when --model=value (equals form) is already present', () => {
+      // Reachable only via raw passthrough after `--` (e.g. `-m X -- --model=Y`); the
+      // guard must still recognise the equals form so the binary never gets two --model.
+      process.env.CODEMIE_CLI_MODEL = 'claude-opus-4-5';
+      expect(enrich(['--model=claude-haiku-4-5'])).toEqual(['--model=claude-haiku-4-5']);
+    });
+
     it('composes with the --plugin-dir injection (plugin-dir first, then model)', () => {
       process.env.CODEMIE_CLI_MODEL = 'claude-opus-4-5';
       process.env.CODEMIE_CLAUDE_EXTENSION_DIR = '/ext';
