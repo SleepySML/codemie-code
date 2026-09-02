@@ -314,15 +314,40 @@ export class CredentialStore {
    * @returns Storage key (e.g., "sso-abc123...")
    */
   private getUrlStorageKey(baseUrl: string): string {
-    let normalized: string;
+    return this.hashStorageKey(this.normalizeForKey(baseUrl));
+  }
+
+  /**
+   * Storage key as it was derived before the URL was normalized to protocol+host.
+   * Only used to find and clean up credentials written by an earlier version.
+   */
+  private getLegacyUrlStorageKey(baseUrl: string): string {
+    return this.hashStorageKey(baseUrl.replace(/\/$/, '').toLowerCase());
+  }
+
+  private hashStorageKey(normalized: string): string {
+    return `sso-${crypto.createHash('sha256').update(normalized).digest('hex')}`;
+  }
+
+  /**
+   * Reduce a URL to protocol+host, or return it unchanged if it is not an
+   * http(s) URL with a host.
+   *
+   * `new URL()` does not throw on `scheme:rest` strings — `new URL('localhost:8080')`
+   * parses as protocol `localhost:` with an *empty* host. Without the host and
+   * protocol guard every scheme-less `host:port` would normalize to the same
+   * `scheme://` and two different instances would share one credential entry.
+   */
+  private normalizeForKey(baseUrl: string): string {
     try {
       const parsed = new URL(baseUrl);
-      normalized = `${parsed.protocol}//${parsed.host}`.toLowerCase();
+      if (parsed.host && (parsed.protocol === 'http:' || parsed.protocol === 'https:')) {
+        return `${parsed.protocol}//${parsed.host}`.toLowerCase();
+      }
     } catch {
-      normalized = baseUrl.replace(/\/$/, '').toLowerCase();
+      // Not a parseable URL — fall through to the raw form.
     }
-    const hash = crypto.createHash('sha256').update(normalized).digest('hex');
-    return `sso-${hash}`;
+    return baseUrl.replace(/\/$/, '').toLowerCase();
   }
 
   async storeSSOCredentials(credentials: SSOCredentials, baseUrl?: string): Promise<void> {
@@ -349,32 +374,73 @@ export class CredentialStore {
   }
 
   async retrieveSSOCredentials(baseUrl?: string): Promise<SSOCredentials | null> {
-    // Determine storage key based on whether baseUrl is provided
-    const accountName = baseUrl ? this.getUrlStorageKey(baseUrl) : ACCOUNT_NAME;
-    const filePath = baseUrl
-      ? path.join(CREDENTIALS_DIR, `${this.getUrlStorageKey(baseUrl)}.enc`)
-      : FALLBACK_FILE;
+    if (!baseUrl) {
+      return this.readCredential(ACCOUNT_NAME, FALLBACK_FILE);
+    }
 
-    // Try keychain first if available
+    const key = this.getUrlStorageKey(baseUrl);
+    const current = await this.readCredential(key, this.credentialFilePath(key));
+    if (current) {
+      return current;
+    }
+
+    // Credentials written before the key was normalized live under the raw-URL key.
+    // Migrate on first read, otherwise they stay unreachable — and undeletable,
+    // since clearSSOCredentials would only ever look at the normalized key.
+    const legacyKey = this.getLegacyUrlStorageKey(baseUrl);
+    if (legacyKey === key) {
+      return null;
+    }
+
+    const legacy = await this.readCredential(legacyKey, this.credentialFilePath(legacyKey));
+    if (!legacy) {
+      return null;
+    }
+
+    await this.storeSSOCredentials(legacy, baseUrl);
+    await this.deleteCredential(legacyKey, this.credentialFilePath(legacyKey));
+    return legacy;
+  }
+
+  async clearSSOCredentials(baseUrl?: string): Promise<void> {
+    if (!baseUrl) {
+      await this.deleteCredential(ACCOUNT_NAME, FALLBACK_FILE);
+      return;
+    }
+
+    const key = this.getUrlStorageKey(baseUrl);
+    await this.deleteCredential(key, this.credentialFilePath(key));
+
+    const legacyKey = this.getLegacyUrlStorageKey(baseUrl);
+    if (legacyKey !== key) {
+      await this.deleteCredential(legacyKey, this.credentialFilePath(legacyKey));
+    }
+  }
+
+  private credentialFilePath(storageKey: string): string {
+    return path.join(CREDENTIALS_DIR, `${storageKey}.enc`);
+  }
+
+  private async readCredential(
+    accountName: string,
+    filePath: string,
+  ): Promise<SSOCredentials | null> {
     const keytarModule = await getKeytar();
     if (keytarModule) {
       try {
         const encrypted = await keytarModule.getPassword(SERVICE_NAME, accountName);
         if (encrypted) {
-          const decrypted = this.decrypt(encrypted);
-          return JSON.parse(decrypted);
+          return JSON.parse(this.decrypt(encrypted));
         }
       } catch {
         // Fall through to file storage
       }
     }
 
-    // Always try file storage as fallback
     try {
       const encrypted = await this.retrieveFromFile(filePath);
       if (encrypted) {
-        const decrypted = this.decrypt(encrypted);
-        return JSON.parse(decrypted);
+        return JSON.parse(this.decrypt(encrypted));
       }
     } catch {
       // Unable to decrypt file storage
@@ -383,14 +449,7 @@ export class CredentialStore {
     return null;
   }
 
-  async clearSSOCredentials(baseUrl?: string): Promise<void> {
-    // Determine storage key based on whether baseUrl is provided
-    const accountName = baseUrl ? this.getUrlStorageKey(baseUrl) : ACCOUNT_NAME;
-    const filePath = baseUrl
-      ? path.join(CREDENTIALS_DIR, `${this.getUrlStorageKey(baseUrl)}.enc`)
-      : FALLBACK_FILE;
-
-    // Clear keychain if available
+  private async deleteCredential(accountName: string, filePath: string): Promise<void> {
     const keytarModule = await getKeytar();
     if (keytarModule) {
       try {
@@ -400,7 +459,6 @@ export class CredentialStore {
       }
     }
 
-    // Also clear file storage
     try {
       await fs.unlink(filePath);
     } catch {
