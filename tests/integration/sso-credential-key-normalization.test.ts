@@ -150,10 +150,12 @@ describe('EPMCDME-14132: credentials written under the pre-fix key stay reachabl
     await rm(currentFile, { force: true });
   });
 
+  // Exercised through CodeMieSSO, not CredentialStore directly: the production
+  // caller is what decides whether the legacy key is ever probed.
   it('reads a credential stored under the legacy key', async () => {
     await seedLegacyCredential();
 
-    const found = await CredentialStore.getInstance().retrieveSSOCredentials(API_URL);
+    const found = await new CodeMieSSO().getStoredCredentials(API_URL);
 
     expect(found?.cookies.codemie_access_token).toBe('legacy-token');
   });
@@ -161,7 +163,7 @@ describe('EPMCDME-14132: credentials written under the pre-fix key stay reachabl
   it('deletes the legacy entry on logout so it cannot linger', async () => {
     await seedLegacyCredential();
 
-    await CredentialStore.getInstance().clearSSOCredentials(API_URL);
+    await new CodeMieSSO().clearStoredCredentials(API_URL);
 
     expect(await exists(legacyFile)).toBe(false);
     expect(await exists(currentFile)).toBe(false);

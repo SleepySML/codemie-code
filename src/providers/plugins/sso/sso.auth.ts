@@ -181,7 +181,10 @@ export class CodeMieSSO {
     const store = CredentialStore.getInstance();
     const baseUrl = normalizeToBase(url);
 
-    let credentials = await store.retrieveSSOCredentials(baseUrl);
+    // Pass the caller's URL through unnormalized: CredentialStore derives the key
+    // itself, and it needs the original form to find credentials an older version
+    // stored under the raw-URL key. Pre-normalizing here would hide them.
+    let credentials = await store.retrieveSSOCredentials(url);
 
     // Fallback to global credentials for backward compatibility
     if (!credentials && allowFallback) {
@@ -198,7 +201,7 @@ export class CodeMieSSO {
 
     // Check if credentials are expired
     if (credentials && credentials.expiresAt && Date.now() > credentials.expiresAt) {
-      await store.clearSSOCredentials(baseUrl);
+      await store.clearSSOCredentials(url);
       return null;
     }
 
