@@ -133,6 +133,7 @@ export class CodeMieSSO {
         };
 
         const store = CredentialStore.getInstance();
+        // Key must match getStoredCredentials() lookup, which normalizes to protocol+host
         await store.storeSSOCredentials(credentials, this.codeMieUrl);
         // Fresh credentials — analytics auth is healthy again
         await clearAnalyticsAuthStatus();
