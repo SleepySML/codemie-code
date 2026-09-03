@@ -74,6 +74,36 @@ describe('installProcessGuards', () => {
     expect(stderr.join('\n')).not.toContain('at ');
   });
 
+  it('passes the original error to the logger so the stack is preserved', async () => {
+    const { logger } = await import('../logger.js');
+    const { installProcessGuards } = await import('../process-guards.js');
+    installProcessGuards();
+
+    const boom = new Error('credentials unavailable');
+
+    expect(() => handlers.uncaughtException(boom)).toThrow('process.exit:1');
+
+    // logger.error only extracts .stack when the 2nd arg is `instanceof Error`;
+    // wrapping it in an object literal stringifies to "[object Object]".
+    expect(logger.error).toHaveBeenCalledWith(expect.any(String), boom);
+  });
+
+  it('sets a non-zero exitCode before exiting so a premature natural exit still fails', async () => {
+    const { installProcessGuards } = await import('../process-guards.js');
+    installProcessGuards();
+
+    const original = process.exitCode;
+    try {
+      process.exitCode = 0;
+      expect(() => handlers.uncaughtException(new Error('boom'))).toThrow(
+        'process.exit:1'
+      );
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.exitCode = original;
+    }
+  });
+
   it('handles a non-Error rejection reason without crashing', async () => {
     const { installProcessGuards } = await import('../process-guards.js');
     installProcessGuards();

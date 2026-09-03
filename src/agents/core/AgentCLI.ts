@@ -10,6 +10,7 @@ import { AuthMethod, ProviderName } from '../../providers/core/types.js';
 import { JWTTemplate } from '../../providers/plugins/jwt/jwt.template.js';
 import { logger } from '../../utils/logger.js';
 import { getDirname } from '../../utils/paths.js';
+import { installProcessGuards } from '../../utils/process-guards.js';
 import { BUILTIN_AGENT_NAME } from '../registry.js';
 import { ClaudePluginMetadata } from '../plugins/claude/claude.plugin.js';
 import { CodeMieCodePluginMetadata } from '../plugins/codemie-code.plugin.js';
@@ -36,6 +37,11 @@ export class AgentCLI {
   private version: string = '1.0.0';
 
   constructor(private adapter: AgentAdapter) {
+    // Every bin/codemie-<agent> entrypoint reaches the CLI through here rather
+    // than bin/codemie.js, so the guards are installed here to cover them too
+    // (EPMCDME-14148). installProcessGuards() is idempotent.
+    installProcessGuards();
+
     this.program = new Command();
     this.loadVersion();
     this.setupProgram();

@@ -26,11 +26,18 @@ describe('non-interactive SSO auth failure', () => {
     rmSync(isolatedHome, { recursive: true, force: true });
   });
 
+  const EXPECTED_MESSAGE =
+    'SSO authentication required. Please run "codemie setup" with SSO provider first.';
+
   function runWithoutTty(command: string) {
     const result = runner.runSilent(command, {
       env: { ...process.env, CODEMIE_HOME: isolatedHome },
       // stdin from 'ignore' is not a TTY, which is the condition under test.
       stdio: ['ignore', 'pipe', 'pipe'],
+      // runSilent wraps execSync, which blocks the worker synchronously —
+      // Vitest's testTimeout cannot interrupt it. Without this, a regression to
+      // the original hang would wedge CI instead of failing here.
+      timeout: 15_000,
     });
     return { ...result, combined: `${result.output}\n${result.error ?? ''}` };
   }
@@ -44,7 +51,16 @@ describe('non-interactive SSO auth failure', () => {
   it('names the remediation the user should run', () => {
     const result = runWithoutTty('sdk assistants list');
 
-    expect(result.combined).toMatch(/codemie setup/);
+    // Asserted verbatim: a loose /codemie setup/ match is also satisfied by
+    // unrelated setup advice from other failure paths.
+    expect(result.combined).toContain(EXPECTED_MESSAGE);
+  });
+
+  it('sends the diagnostic to stderr and keeps it off stdout', () => {
+    const result = runWithoutTty('sdk assistants list');
+
+    expect(result.error ?? '').toContain(EXPECTED_MESSAGE);
+    expect(result.output).not.toContain(EXPECTED_MESSAGE);
   });
 
   it('does not print a raw stack trace', () => {

@@ -8,27 +8,72 @@
  * (EPMCDME-14148); commands should still handle their own errors.
  */
 
+import { appendFileSync } from 'node:fs';
 import chalk from 'chalk';
 import { getErrorMessage } from './errors.js';
 import { logger } from './logger.js';
+import { sanitizeLogArgs } from './security.js';
+
+/**
+ * Append the fatal detail synchronously.
+ *
+ * logger writes through an fs.WriteStream, whose write() is asynchronous;
+ * process.exit() does not drain it, so on a cold stream the entry is lost
+ * entirely. A fatal is exactly when the record matters most.
+ */
+function persistFatalSync(kind: string, payload: unknown): void {
+  try {
+    const logPath = logger.getLogFilePath();
+    if (!logPath) {
+      return;
+    }
+
+    const detail =
+      payload instanceof Error && payload.stack
+        ? payload.stack
+        : getErrorMessage(payload);
+    const [safeDetail] = sanitizeLogArgs(detail);
+
+    appendFileSync(
+      logPath,
+      `[${new Date().toISOString()}] [FATAL] ${kind}: ${String(safeDetail)}\n`
+    );
+  } catch {
+    // A logging failure must never mask the original fatal.
+  }
+}
 
 function reportFatal(kind: string, payload: unknown): never {
   const message = getErrorMessage(payload);
 
-  // Full detail, stack included, goes to the log file only.
-  logger.error(`${kind}: ${message}`, {
-    stack: payload instanceof Error ? payload.stack : undefined,
-  });
+  // Set first: if anything below exits early, the code is still non-zero.
+  process.exitCode = 1;
 
+  // Pass the payload itself — logger extracts .message/.stack only from a real
+  // Error; an object literal would stringify to "[object Object]".
+  logger.error(`${kind}: ${message}`, payload);
+  persistFatalSync(kind, payload);
+
+  // Console gets the actionable line only; the stack belongs in the log file.
   console.error(chalk.red(`\n❌ ${message}\n`));
   process.exit(1);
 }
 
+let installed = false;
+
 /**
  * Register process-level handlers for unhandled rejections and uncaught
  * exceptions so they surface as a formatted message rather than a stack trace.
+ *
+ * Idempotent: both bin/codemie.js and AgentCLI call it, and they can share a
+ * process, which would otherwise stack duplicate handlers.
  */
 export function installProcessGuards(): void {
+  if (installed) {
+    return;
+  }
+  installed = true;
+
   process.on('unhandledRejection', (reason: unknown) => {
     reportFatal('Unhandled rejection', reason);
   });

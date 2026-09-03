@@ -122,10 +122,18 @@ clean. Progress spinners are suppressed when no TTY is attached, so captured log
 cursor-control escape sequences.
 
 There is no separate `--non-interactive` flag to set — detection is automatic, based solely on
-whether `stdin` is a TTY. To run unattended in CI, either authenticate ahead of time
+whether `stdin` is a TTY.
+
+> **Known limitation.** Because detection looks only at `stdin`, it does **not** fire in an
+> environment that allocates a pseudo-TTY — `docker run -t`, and some Jenkins and GitLab runner
+> configurations. There, a missing SSO session can still reach the interactive prompt and block. The
+> `CI` environment variable is not consulted. If your runner allocates a TTY, do not rely on
+> automatic detection; use one of the two unattended options below.
+
+To run unattended in CI, either authenticate ahead of time
 (`codemie profile login`) with credentials persisted before the run, or use
 [JWT Bearer Authorization](#jwt-bearer-authorization) instead, which requires no interactive
-session at all.
+session at all. The JWT path never prompts, so it is the safest choice for a pty-allocating runner.
 
 ## Enterprise SSO Features
 
