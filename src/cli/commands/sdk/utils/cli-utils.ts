@@ -11,10 +11,19 @@ import z, { ZodError } from "zod";
 
 /**
  * Get an authenticated CodeMie SDK client
+ *
+ * Auth acquisition is routed through handleSdkError so a failure exits with a
+ * formatted message rather than an uncaught throw. Every sdk action calls
+ * getSdkClient() outside its own try/catch, so this is the single gate that
+ * keeps a missing session from printing a raw stack trace (EPMCDME-14148).
  */
 export async function getSdkClient(): Promise<CodeMieClient> {
-  const config = await ConfigLoader.load();
-  return getAuthenticatedClient(config);
+  try {
+    const config = await ConfigLoader.load();
+    return await getAuthenticatedClient(config);
+  } catch (error) {
+    handleSdkError(error, "authenticate");
+  }
 }
 
 /**
