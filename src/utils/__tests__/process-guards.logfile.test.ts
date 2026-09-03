@@ -39,14 +39,13 @@ describe('installProcessGuards log-file persistence', () => {
     const { logger } = await import('../logger.js');
     const { installProcessGuards } = await import('../process-guards.js');
 
+    // Asserted rather than early-returned: a silent `return` here would make
+    // this test pass vacuously in any environment where log init fails, which
+    // is exactly the coverage this file exists to provide.
     const logPath = logger.getLogFilePath();
-    // Logging to file is best-effort; if this environment has no log path there
-    // is nothing to assert against.
-    if (!logPath) {
-      return;
-    }
+    expect(logPath).toBeTruthy();
 
-    const before = existsSync(logPath) ? readFileSync(logPath, 'utf-8') : '';
+    const before = existsSync(logPath!) ? readFileSync(logPath!, 'utf-8') : '';
 
     installProcessGuards();
 
@@ -55,7 +54,7 @@ describe('installProcessGuards log-file persistence', () => {
 
     expect(() => handlers.uncaughtException(boom)).toThrow('process.exit:1');
 
-    const after = readFileSync(logPath, 'utf-8');
+    const after = readFileSync(logPath!, 'utf-8');
     const appended = after.slice(before.length);
 
     expect(appended).toContain(marker);
