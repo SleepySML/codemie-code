@@ -39,6 +39,13 @@ describe('non-interactive SSO auth failure', () => {
       // the original hang would wedge CI instead of failing here.
       timeout: 15_000,
     });
+
+    // On ETIMEDOUT execSync reports status: null, which runSilent collapses to
+    // exitCode 1 — and stderr already holds whatever was printed before the
+    // block. Without this guard a genuine 15s hang passes every assertion
+    // below, including the one named for it.
+    expect(result.timedOut ?? false).toBe(false);
+
     return { ...result, combined: `${result.output}\n${result.error ?? ''}` };
   }
 

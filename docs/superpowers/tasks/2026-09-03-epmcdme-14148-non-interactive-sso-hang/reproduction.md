@@ -60,7 +60,9 @@ The guard is still confirmed working — but by `auth-validation.test.ts` and by
 
 ### Case D — AC4: kill during the prompt
 
-Ran under a pty, sent `SIGINT` then `SIGTERM` while parked on the prompt. **No `ERR_USE_AFTER_CLOSE` and no readline lifecycle error** appeared across two attempts.
+Ran under a pty and sent `SIGINT` then `SIGTERM`. **No `ERR_USE_AFTER_CLOSE` and no readline lifecycle error** appeared across two attempts.
+
+**Corrected:** an earlier draft described these signals as being sent "while parked on the prompt". That was an assumption, not an observation, and the later node-pty work disproved it — the process exits before any signal is delivered and the prompt is never reached. See `ac4-investigation.md`; the criterion was never exercised.
 
 Incidental observation, **not** confirmed as a product bug: after the interrupt the `ora` spinner emitted a runaway stream of cursor-control escapes (`ESC[1A ESC[0K`), producing a 73 MB capture. This is most likely an artifact of `script` giving the child a pty with no usable `stdout.columns`, which breaks ora's line-clearing arithmetic. It should be re-checked in a real terminal before anyone treats it as a finding.
 
@@ -107,7 +109,7 @@ Note that `handleSdkError`'s `else` branch **already** renders `ConfigurationErr
 
 | AC | Verdict | Evidence |
 |---|---|---|
-| Non-TTY stdin skips interactive prompt | **Met already** | Case A/B (0–1 s, no prompt) vs Case C (blocks with TTY) |
+| Non-TTY stdin skips interactive prompt | **Met already** | Cases A/B exit in 0–1 s without prompting, plus the `auth-validation.test.ts` guard tests. **Not** Case C, which this document retracts as a `script(1)` artifact |
 | CLI exits non-zero with clear remediation | **Not met** | Case A/B: exit 1 but raw stack trace; message lacks `codemie setup` |
 | `--non-interactive` / `--ci` supported or documented | **Partially met** | No such flag in `src/`, but the absence is documented at `docs/AUTHENTICATION.md:113`. The AC reads "supported **or** documented". Not a clean pass: the documented mechanism (`stdin` TTY only) has a blind spot for pty-allocating CI — now stated explicitly in that doc |
 | Kill during prompt produces no readline crash | **Not exercised** | The prompt was never reached in any attempt, so the criterion was never tested — see `ac4-investigation.md` |
