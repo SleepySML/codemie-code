@@ -61,7 +61,10 @@ export class CLIRunner {
         output,
         exitCode: error.status || 1,
         error: errorOutput,
-        timedOut: error.code === 'ETIMEDOUT' || error.signal === 'SIGTERM',
+        // ETIMEDOUT alone covers every timeout mode, including a child that
+        // ignores SIGTERM. Testing signal === 'SIGTERM' as well adds nothing and
+        // misreports an unrelated SIGTERM death as a hang.
+        timedOut: error.code === 'ETIMEDOUT',
       };
     }
   }
