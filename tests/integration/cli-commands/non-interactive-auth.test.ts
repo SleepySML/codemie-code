@@ -30,6 +30,7 @@ describe('non-interactive SSO auth failure', () => {
     'SSO authentication required. Please run "codemie setup" with SSO provider first.';
 
   function runWithoutTty(command: string) {
+    const startedAt = Date.now();
     const result = runner.runSilent(command, {
       env: { ...process.env, CODEMIE_HOME: isolatedHome },
       // stdin from 'ignore' is not a TTY, which is the condition under test.
@@ -45,6 +46,12 @@ describe('non-interactive SSO auth failure', () => {
     // block. Without this guard a genuine 15s hang passes every assertion
     // below, including the one named for it.
     expect(result.timedOut ?? false).toBe(false);
+
+    // The timeout only catches a hang that runs the full 15s. A regression that
+    // blocked for a few seconds would still satisfy every assertion below and
+    // merely slow the suite. Observed runtime is ~280ms, so this leaves ~18x
+    // headroom while still catching a stall.
+    expect(Date.now() - startedAt).toBeLessThan(5_000);
 
     return { ...result, combined: `${result.output}\n${result.error ?? ''}` };
   }

@@ -65,8 +65,9 @@ let installed = false;
  * Register process-level handlers for unhandled rejections and uncaught
  * exceptions so they surface as a formatted message rather than a stack trace.
  *
- * Idempotent: both bin/codemie.js and AgentCLI call it, and they can share a
- * process, which would otherwise stack duplicate handlers.
+ * Called from each bin/* entrypoint rather than from AgentCLI, so constructing
+ * an AgentCLI never mutates global process state. Idempotent as a guard against
+ * one process loading more than one entrypoint.
  */
 export function installProcessGuards(): void {
   if (installed) {
