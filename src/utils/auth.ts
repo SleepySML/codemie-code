@@ -44,7 +44,15 @@ export async function getAuthenticatedClient(config: ProviderProfile): Promise<C
     return await getCodemieClient();
   } catch (error) {
     if (error instanceof ConfigurationError && error.message.includes('SSO authentication required')) {
-      const reauthed = await promptReauthentication(config);
+      let reauthed = false;
+      try {
+        reauthed = await promptReauthentication(config);
+      } catch {
+        // promptReauthentication's generic 'Authentication expired' throw would
+        // shadow the upstream message, which is the one naming the remediation
+        // the user needs in non-interactive runs (EPMCDME-14148).
+        throw error;
+      }
       if (reauthed) {
         return await getCodemieClient();
       }
