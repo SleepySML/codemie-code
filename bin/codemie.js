@@ -7,6 +7,11 @@
 
 import { MigrationRunner } from '../dist/migrations/index.js';
 import { checkAndPromptForUpdate } from '../dist/utils/cli-updater.js';
+import { installProcessGuards } from '../dist/utils/process-guards.js';
+
+// Last-line-of-defence net for async rejections that escape a command action.
+// program.parse() is sync, so those never reach the import().catch() below.
+installProcessGuards();
 
 // Auto-run pending migrations (happens at startup)
 // Migrations are tracked in ~/.codemie/migrations.json and only run once
