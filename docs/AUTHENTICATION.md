@@ -104,7 +104,7 @@ codemie setup                    # Run wizard again
 ### Non-Interactive Environments (CI/Automation)
 
 When SSO credentials are missing or expired, the CLI normally offers an interactive
-re-authentication prompt. In a non-interactive environment — no TTY attached to `stdin`, as in CI
+re-authentication prompt. In a non-interactive environment — no TTY attached to `stdin`, as in most CI
 pipelines, cron jobs, or piped/redirected invocations — that prompt is automatically skipped. The
 CLI detects the missing TTY, fails fast, and exits non-zero instead of hanging.
 
