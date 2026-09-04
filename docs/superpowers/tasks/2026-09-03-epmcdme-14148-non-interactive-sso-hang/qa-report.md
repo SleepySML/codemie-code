@@ -1,10 +1,12 @@
 # QA Gate Report — EPMCDME-14148
 
 **Branch**: `EPMCDME-14148`
-**Merge base**: `origin/main` @ `1d5cc22b`
+**Merge base**: `origin/main` @ `d7097a2a` (rebased; originally cut from `1d5cc22b`)
 **Runner**: npm (guide-first from `.ai-run/guides/quality-gates.md`)
 **Started**: 2026-09-03T18:05:00Z
 **Status**: PASSED (with two SKIPPED gates owed to CI — see below)
+
+> **Re-run after rebase.** `origin/main` advanced by one commit (`d7097a2a`, revert of the LiteLLM/SSO setup enforcement gate) while this work was in progress. The branch was rebased onto it and every gate below was re-run against the rebased tree. That commit also **renamed the test scripts** — `test:unit` and `test:integration` no longer exist in `package.json`; the commands below are the current equivalents. The unit count drops from 3969 to 3939 because the revert removed its own tests, not because anything here regressed.
 
 ## Gates
 
@@ -14,8 +16,8 @@
 | lint | guide | PASS | 2s | `npm run lint` | `--max-warnings=0`; `no-useless-catch` did not fire on either new catch |
 | typecheck | guide | PASS | 2s | `npm run typecheck` | |
 | build | guide | PASS | 2s | `npm run build` | |
-| unit | guide | PASS | 6s | `npm run test:unit` | **3969 passed / 3969**, 269 files, 0 failures |
-| integration | guide + ci | **PARTIAL** | — | `npm run test:integration` | See below — pre-existing local hangs, not caused by this branch |
+| unit | guide | PASS | 5s | `npx vitest run --project unit` | **3939 passed / 3939**, 267 files, 0 failures (post-rebase) |
+| integration | guide + ci | **PARTIAL** | — | `npx vitest run --project cli` | See below — pre-existing local hangs, not caused by this branch |
 | commitlint | guide + ci | PASS | 0s | `npx commitlint --from origin/main --to HEAD --verbose` | 0 problems, 0 warnings across all 7 commits |
 | secrets | hook | **SKIPPED** | 0s | `npm run validate:secrets` | Self-skipped — see below |
 | affected | guide | N/A | — | — | No changed-file-aware command configured in this project |
