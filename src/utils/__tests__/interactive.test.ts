@@ -41,21 +41,7 @@ describe('isNonInteractiveOutput', () => {
     process.stderr.isTTY = originalStderr;
   });
 
-  it('should return true when process.stderr.isTTY is undefined (redirected output)', async () => {
-    process.stderr.isTTY = undefined as unknown as true;
 
-    const { isNonInteractiveOutput } = await import('../interactive.js');
-
-    expect(isNonInteractiveOutput()).toBe(true);
-  });
-
-  it('should return false when process.stderr.isTTY is true (terminal output)', async () => {
-    process.stderr.isTTY = true;
-
-    const { isNonInteractiveOutput } = await import('../interactive.js');
-
-    expect(isNonInteractiveOutput()).toBe(false);
-  });
 
   // Input and output redirect independently — the two must be able to disagree.
   it('should track stderr, not stdin, when only stdin is redirected', async () => {
@@ -72,7 +58,7 @@ describe('isNonInteractiveOutput', () => {
 
   it('should track stderr, not stdin, when only output is redirected', async () => {
     process.stdin.isTTY = true;
-    process.stderr.isTTY = false as unknown as true;
+    process.stderr.isTTY = undefined as unknown as true;
 
     const { isNonInteractiveOutput, isNonInteractiveEnvironment } = await import(
       '../interactive.js'

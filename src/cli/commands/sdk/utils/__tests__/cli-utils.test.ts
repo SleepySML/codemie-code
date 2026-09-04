@@ -36,7 +36,7 @@ describe('getSdkClient', () => {
     vi.resetModules();
   });
 
-  it('exits non-zero through handleSdkError when authentication fails', async () => {
+  it('exits non-zero via handleSdkError with the remediation on stderr', async () => {
     const { ConfigLoader } = await import('@/utils/config.js');
     const { getAuthenticatedClient } = await import('@/utils/auth.js');
     const { ConfigurationError } = await import('@/utils/errors.js');
@@ -51,21 +51,6 @@ describe('getSdkClient', () => {
     // handleSdkError terminates the process; the spy converts that into a throw.
     await expect(getSdkClient()).rejects.toThrow('process.exit:1');
     expect(exitCode).toBe(1);
-  });
-
-  it('surfaces the actionable remediation on stderr rather than a raw stack trace', async () => {
-    const { ConfigLoader } = await import('@/utils/config.js');
-    const { getAuthenticatedClient } = await import('@/utils/auth.js');
-    const { ConfigurationError } = await import('@/utils/errors.js');
-
-    vi.mocked(ConfigLoader.load).mockResolvedValue({} as never);
-    vi.mocked(getAuthenticatedClient).mockRejectedValue(
-      new ConfigurationError(SSO_ERROR_MESSAGE)
-    );
-
-    const { getSdkClient } = await import('../cli-utils.js');
-
-    await expect(getSdkClient()).rejects.toThrow('process.exit:1');
     expect(stderr.join('\n')).toContain('codemie setup');
   });
 
