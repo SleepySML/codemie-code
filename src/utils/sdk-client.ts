@@ -22,10 +22,7 @@ import { logger } from './logger.js';
  * @throws ConfigurationError if setup is incomplete or credentials are invalid
  */
 export async function getCodemieClient(quiet = false): Promise<CodeMieClient> {
-  // ora writes to stderr, so the spinner follows stderr's TTY-ness, not
-  // stdin's. Gating on stdin would still emit cursor-control escapes into
-  // `cmd > log 2>&1` while needlessly dropping the spinner for `cmd < input`
-  // (EPMCDME-14148).
+  // ora writes to stderr, so gate on stderr, not stdin (EPMCDME-14148).
   const showProgress = !quiet && !isNonInteractiveOutput();
 
   let spinner;

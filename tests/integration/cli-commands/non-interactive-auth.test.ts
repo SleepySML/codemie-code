@@ -1,10 +1,4 @@
-/**
- * EPMCDME-14148 — non-interactive SSO failure must fail cleanly.
- *
- * End-to-end proof of the acceptance criterion: with no valid SSO session and
- * a non-TTY stdin, the CLI exits non-zero with actionable remediation and
- * without a raw stack trace.
- */
+/** EPMCDME-14148 — non-interactive SSO failure must exit cleanly, end to end. */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -17,8 +11,7 @@ describe('non-interactive SSO auth failure', () => {
   let isolatedHome: string;
 
   beforeAll(() => {
-    // An empty home guarantees "no valid SSO session" without touching the
-    // developer's real ~/.codemie credentials.
+    // Empty home = "no valid SSO session", without touching the real ~/.codemie.
     isolatedHome = mkdtempSync(join(tmpdir(), 'codemie-14148-'));
   });
 
@@ -33,24 +26,16 @@ describe('non-interactive SSO auth failure', () => {
     const startedAt = Date.now();
     const result = runner.runSilent(command, {
       env: { ...process.env, CODEMIE_HOME: isolatedHome },
-      // stdin from 'ignore' is not a TTY, which is the condition under test.
+      // 'ignore' stdin is not a TTY — the condition under test.
       stdio: ['ignore', 'pipe', 'pipe'],
-      // runSilent wraps execSync, which blocks the worker synchronously —
-      // Vitest's testTimeout cannot interrupt it. Without this, a regression to
-      // the original hang would wedge CI instead of failing here.
+      // execSync blocks the worker, so Vitest's testTimeout cannot interrupt a hang.
       timeout: 15_000,
     });
 
-    // On ETIMEDOUT execSync reports status: null, which runSilent collapses to
-    // exitCode 1 — and stderr already holds whatever was printed before the
-    // block. Without this guard a genuine 15s hang passes every assertion
-    // below, including the one named for it.
+    // Without these two, a hang satisfies every assertion below — including the
+    // one named for it: ETIMEDOUT yields status null, which collapses to exit 1,
+    // and stderr already holds what was printed before the block.
     expect(result.timedOut ?? false).toBe(false);
-
-    // The timeout only catches a hang that runs the full 15s. A regression that
-    // blocked for a few seconds would still satisfy every assertion below and
-    // merely slow the suite. Observed runtime is ~280ms, so this leaves ~18x
-    // headroom while still catching a stall.
     expect(Date.now() - startedAt).toBeLessThan(5_000);
 
     return { ...result, combined: `${result.output}\n${result.error ?? ''}` };
@@ -65,8 +50,7 @@ describe('non-interactive SSO auth failure', () => {
   it('names the remediation the user should run', () => {
     const result = runWithoutTty('sdk assistants list');
 
-    // Asserted verbatim: a loose /codemie setup/ match is also satisfied by
-    // unrelated setup advice from other failure paths.
+    // Verbatim: a loose /codemie setup/ also matches other failure paths.
     expect(result.combined).toContain(EXPECTED_MESSAGE);
   });
 

@@ -48,9 +48,8 @@ export async function getAuthenticatedClient(config: ProviderProfile): Promise<C
       try {
         reauthed = await promptReauthentication(config);
       } catch {
-        // promptReauthentication's generic 'Authentication expired' throw would
-        // shadow the upstream message, which is the one naming the remediation
-        // the user needs in non-interactive runs (EPMCDME-14148).
+        // Keep the upstream error: it names the remediation, the inner throw
+        // does not (EPMCDME-14148).
         throw error;
       }
       if (reauthed) {

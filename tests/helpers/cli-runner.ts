@@ -12,10 +12,9 @@ export interface CommandResult {
   exitCode: number;
   error?: string;
   /**
-   * True when the child was killed by the `timeout` option rather than exiting
-   * on its own. execSync reports ETIMEDOUT with `status: null`, which would
-   * otherwise collapse to exitCode 1 and be indistinguishable from a clean
-   * failure — letting a hang masquerade as a passing test.
+   * Killed by the `timeout` option rather than exiting on its own. execSync
+   * reports ETIMEDOUT with `status: null`, which would otherwise collapse to
+   * exitCode 1 and let a hang masquerade as a clean failure.
    */
   timedOut?: boolean;
 }
@@ -61,9 +60,6 @@ export class CLIRunner {
         output,
         exitCode: error.status || 1,
         error: errorOutput,
-        // ETIMEDOUT alone covers every timeout mode, including a child that
-        // ignores SIGTERM. Testing signal === 'SIGTERM' as well adds nothing and
-        // misreports an unrelated SIGTERM death as a hang.
         timedOut: error.code === 'ETIMEDOUT',
       };
     }

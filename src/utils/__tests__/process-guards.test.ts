@@ -59,7 +59,6 @@ describe('installProcessGuards', () => {
 
     const output = stderr.join('\n');
     expect(output).toContain('credentials unavailable');
-    // The guide forbids stack traces on the console; they belong in the log file.
     expect(output).not.toContain('at ');
   });
 
@@ -83,8 +82,8 @@ describe('installProcessGuards', () => {
 
     expect(() => handlers.uncaughtException(boom)).toThrow('process.exit:1');
 
-    // logger.error only extracts .stack when the 2nd arg is `instanceof Error`;
-    // wrapping it in an object literal stringifies to "[object Object]".
+    // logger.error unwraps .stack only from an Error; an object literal
+    // stringifies to "[object Object]".
     expect(logger.error).toHaveBeenCalledWith(expect.any(String), boom);
   });
 

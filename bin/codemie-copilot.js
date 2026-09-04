@@ -16,11 +16,7 @@ import { ConfigLoader } from '../dist/utils/config.js';
 import { getCodemiePath } from '../dist/utils/paths.js';
 import { installProcessGuards } from '../dist/utils/process-guards.js';
 
-// Last-line-of-defence net for async rejections that escape a command action.
-// Installed per entrypoint rather than in the AgentCLI constructor, so merely
-// constructing an AgentCLI (as unit tests do) never mutates global process state.
 installProcessGuards();
-
 
 const SAVED_MODEL_PATH = getCodemiePath('agents', 'copilot-cli', 'model.json');
 

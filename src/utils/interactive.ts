@@ -16,13 +16,10 @@ export function isNonInteractiveEnvironment(): boolean {
 }
 
 /**
- * Returns true when progress output would not be rendered to a terminal.
+ * Returns true when progress output would not reach a terminal.
  *
- * Deliberately separate from isNonInteractiveEnvironment(): input and output
- * can be redirected independently. A spinner is an output concern — ora writes
- * to stderr — so gating it on stdin both suppresses it for a terminal user who
- * merely redirects stdin, and fails to suppress it for `cmd > log 2>&1`, which
- * is the case that fills captured logs with cursor-control escapes.
+ * Separate from isNonInteractiveEnvironment() because input and output redirect
+ * independently: `cmd > log 2>&1` still has an interactive stdin.
  */
 export function isNonInteractiveOutput(): boolean {
   return !process.stderr.isTTY;
