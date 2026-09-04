@@ -67,14 +67,12 @@ export async function getAuthenticatedClient(
       && error instanceof ConfigurationError
       && error.message.includes('SSO authentication required')
     ) {
-      let reauthed = false;
-      try {
-        reauthed = await promptReauthentication(config);
-      } catch {
-        // Keep the upstream error: it names the remediation, the inner throw
-        // does not (EPMCDME-14148).
+      // .catch wraps only the prompt: keep the upstream error, which names the
+      // remediation the inner throw does not (EPMCDME-14148). A try around the
+      // retry as well would swallow the retry's own failure.
+      const reauthed = await promptReauthentication(config).catch(() => {
         throw error;
-      }
+      });
       if (reauthed) {
         return await getCodemieClient();
       }

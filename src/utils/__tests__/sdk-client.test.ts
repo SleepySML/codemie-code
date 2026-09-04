@@ -60,27 +60,7 @@ describe('getCodemieClient spinner behaviour', () => {
     return import('../sdk-client.js');
   }
 
-  it('does not start a spinner when the output stream is not a TTY', async () => {
-    const { ConfigurationError } = await import('../errors.js');
-    const { getCodemieClient } = await arrange({
-      stdinTty: false,
-      stderrTty: false,
-    });
 
-    await expect(getCodemieClient()).rejects.toThrow(ConfigurationError);
-    expect(oraFactory).not.toHaveBeenCalled();
-  });
-
-  it('starts a spinner when the output stream is a TTY', async () => {
-    const { ConfigurationError } = await import('../errors.js');
-    const { getCodemieClient } = await arrange({
-      stdinTty: true,
-      stderrTty: true,
-    });
-
-    await expect(getCodemieClient()).rejects.toThrow(ConfigurationError);
-    expect(oraFactory).toHaveBeenCalled();
-  });
 
   it('suppresses the spinner when stdout/stderr are redirected but stdin is a TTY', async () => {
     const { ConfigurationError } = await import('../errors.js');

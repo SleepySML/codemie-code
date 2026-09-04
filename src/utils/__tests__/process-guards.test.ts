@@ -1,7 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('../logger.js', () => ({
-  logger: { error: vi.fn(), debug: vi.fn(), warn: vi.fn(), info: vi.fn() },
+  logger: {
+    error: vi.fn(),
+    debug: vi.fn(),
+    warn: vi.fn(),
+    info: vi.fn(),
+    getLogFilePath: vi.fn(() => null),
+  },
 }));
 
 type Handler = (payload: unknown) => void;

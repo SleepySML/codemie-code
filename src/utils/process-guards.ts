@@ -13,13 +13,8 @@ import { logger } from './logger.js';
 import { sanitizeLogArgs } from './security.js';
 
 /** logger writes through a WriteStream that process.exit() does not drain. */
-function persistFatalSync(kind: string, payload: unknown): void {
+function persistFatalSync(logPath: string, kind: string, payload: unknown): void {
   try {
-    const logPath = logger.getLogFilePath();
-    if (!logPath) {
-      return;
-    }
-
     const detail =
       payload instanceof Error && payload.stack
         ? payload.stack
@@ -38,13 +33,22 @@ function persistFatalSync(kind: string, payload: unknown): void {
 function reportFatal(kind: string, payload: unknown): never {
   const message = getErrorMessage(payload);
 
+  // Set before anything that could exit early: console.error can throw EPIPE
+  // under `codemie … | head`, skipping process.exit() below.
   process.exitCode = 1;
 
-  // Pass payload itself — logger unwraps .stack only from a real Error.
+  // Its file write never survives process.exit() — measured. Kept for the
+  // CODEMIE_DEBUG console echo; persistFatalSync is the durable path.
   logger.error(`${kind}: ${message}`, payload);
-  persistFatalSync(kind, payload);
 
-  console.error(chalk.red(`\n❌ ${message}\n`));
+  const logPath = logger.getLogFilePath();
+  if (logPath) {
+    persistFatalSync(logPath, kind, payload);
+  }
+
+  // Point at the stack rather than printing it, matching logger.notice().
+  const suffix = logPath ? ` (see ${logPath})` : '';
+  console.error(chalk.red(`\n❌ ${message}${suffix}\n`));
   process.exit(1);
 }
 
