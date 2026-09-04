@@ -11,7 +11,7 @@ The ticket describes two symptoms. Only one is still live.
 |---|---|
 | "CLI hangs on a re-authentication prompt" (non-TTY) | **Already fixed** by `5b2de4b7` (PR #471) |
 | "exits non-zero with an actionable message" | **Still broken** — exits 1 via an *unhandled exception + raw stack trace*, and the message drops the actionable remediation |
-| `ERR_USE_AFTER_CLOSE` on kill | **Not reproduced** (see Case D) |
+| `ERR_USE_AFTER_CLOSE` on kill | **Not reproduced** — 12/12 interrupts at a genuinely-reached prompt, zero crashes (`ac4-investigation.md`). Case D below was inconclusive and is superseded |
 | `--non-interactive` / `--ci` flag | **Does not exist** as a flag, but its absence *is* documented (`docs/AUTHENTICATION.md:113`, added by PR #471) — corrected; an earlier draft of this table wrongly called it undocumented |
 
 The residual defect is not a hang. It is that the non-interactive failure path terminates by letting a `ConfigurationError` escape to Node's default handler.
@@ -112,4 +112,4 @@ Note that `handleSdkError`'s `else` branch **already** renders `ConfigurationErr
 | Non-TTY stdin skips interactive prompt | **Met already** | Cases A/B exit in 0–1 s without prompting, plus the `auth-validation.test.ts` guard tests. **Not** Case C, which this document retracts as a `script(1)` artifact |
 | CLI exits non-zero with clear remediation | **Not met** | Case A/B: exit 1 but raw stack trace; message lacks `codemie setup` |
 | `--non-interactive` / `--ci` supported or documented | **Partially met** | No such flag in `src/`, but the absence is documented at `docs/AUTHENTICATION.md:113`. The AC reads "supported **or** documented". Not a clean pass: the documented mechanism (`stdin` TTY only) has a blind spot for pty-allocating CI — now stated explicitly in that doc |
-| Kill during prompt produces no readline crash | **Not exercised** | The prompt was never reached in any attempt, so the criterion was never tested — see `ac4-investigation.md` |
+| Kill during prompt produces no readline crash | **Met** | Later verified properly: 12/12 runs reached the prompt under a real pty and none crashed. The earlier "never reached" reading was an artifact of `CODEMIE_*` env vars injected by the parent CodeMie session — see `ac4-investigation.md` |
