@@ -118,8 +118,10 @@ $ echo $?
 ```
 
 Diagnostics go to stderr rather than stdout, so piping stdout or consuming `--json` output stays
-clean. Progress spinners are suppressed when no TTY is attached, so captured logs do not fill with
-cursor-control escape sequences.
+clean. Progress spinners are suppressed whenever their output stream is not a terminal — including
+`codemie … > run.log 2>&1` from an interactive shell — so captured logs do not fill with
+cursor-control escape sequences. Spinner suppression tracks the **output** stream, independently of
+whether `stdin` is redirected.
 
 There is no separate `--non-interactive` flag to set — detection is automatic, based solely on
 whether `stdin` is a TTY.
