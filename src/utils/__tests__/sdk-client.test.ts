@@ -15,6 +15,7 @@ vi.mock('ora', () => ({ default: oraFactory }));
 
 vi.mock('../interactive.js', () => ({
   isNonInteractiveEnvironment: vi.fn(),
+  isNonInteractiveOutput: vi.fn(),
 }));
 
 vi.mock('../config.js', () => ({
@@ -43,37 +44,77 @@ describe('getCodemieClient spinner behaviour', () => {
     vi.resetModules();
   });
 
-  it('does not start a spinner when the environment is non-interactive', async () => {
-    const { isNonInteractiveEnvironment } = await import('../interactive.js');
+  async function arrange(opts: { stdinTty: boolean; stderrTty: boolean }) {
+    const { isNonInteractiveEnvironment, isNonInteractiveOutput } = await import(
+      '../interactive.js'
+    );
     const { ConfigLoader } = await import('../config.js');
-    const { ConfigurationError } = await import('../errors.js');
 
-    vi.mocked(isNonInteractiveEnvironment).mockReturnValue(true);
+    vi.mocked(isNonInteractiveEnvironment).mockReturnValue(!opts.stdinTty);
+    vi.mocked(isNonInteractiveOutput).mockReturnValue(!opts.stderrTty);
     vi.mocked(ConfigLoader.load).mockResolvedValue({
       codeMieUrl: 'https://example.test',
     } as never);
     getStoredCredentials.mockResolvedValue(null);
 
-    const { getCodemieClient } = await import('../sdk-client.js');
+    return import('../sdk-client.js');
+  }
+
+  it('does not start a spinner when the output stream is not a TTY', async () => {
+    const { ConfigurationError } = await import('../errors.js');
+    const { getCodemieClient } = await arrange({
+      stdinTty: false,
+      stderrTty: false,
+    });
 
     await expect(getCodemieClient()).rejects.toThrow(ConfigurationError);
     expect(oraFactory).not.toHaveBeenCalled();
   });
 
-  it('still starts a spinner when interactive and not explicitly quiet', async () => {
-    const { isNonInteractiveEnvironment } = await import('../interactive.js');
-    const { ConfigLoader } = await import('../config.js');
+  it('starts a spinner when the output stream is a TTY', async () => {
     const { ConfigurationError } = await import('../errors.js');
-
-    vi.mocked(isNonInteractiveEnvironment).mockReturnValue(false);
-    vi.mocked(ConfigLoader.load).mockResolvedValue({
-      codeMieUrl: 'https://example.test',
-    } as never);
-    getStoredCredentials.mockResolvedValue(null);
-
-    const { getCodemieClient } = await import('../sdk-client.js');
+    const { getCodemieClient } = await arrange({
+      stdinTty: true,
+      stderrTty: true,
+    });
 
     await expect(getCodemieClient()).rejects.toThrow(ConfigurationError);
     expect(oraFactory).toHaveBeenCalled();
+  });
+
+  // The two cases below are the point of the change: the spinner writes to
+  // stderr, so it must follow stderr's TTY-ness, not stdin's.
+
+  it('suppresses the spinner when stdout/stderr are redirected but stdin is a TTY', async () => {
+    const { ConfigurationError } = await import('../errors.js');
+    const { getCodemieClient } = await arrange({
+      stdinTty: true,
+      stderrTty: false,
+    });
+
+    await expect(getCodemieClient()).rejects.toThrow(ConfigurationError);
+    expect(oraFactory).not.toHaveBeenCalled();
+  });
+
+  it('keeps the spinner when stdin is redirected but stderr is still a TTY', async () => {
+    const { ConfigurationError } = await import('../errors.js');
+    const { getCodemieClient } = await arrange({
+      stdinTty: false,
+      stderrTty: true,
+    });
+
+    await expect(getCodemieClient()).rejects.toThrow(ConfigurationError);
+    expect(oraFactory).toHaveBeenCalled();
+  });
+
+  it('honours an explicit quiet flag even when stderr is a TTY', async () => {
+    const { ConfigurationError } = await import('../errors.js');
+    const { getCodemieClient } = await arrange({
+      stdinTty: true,
+      stderrTty: true,
+    });
+
+    await expect(getCodemieClient(true)).rejects.toThrow(ConfigurationError);
+    expect(oraFactory).not.toHaveBeenCalled();
   });
 });
