@@ -1,9 +1,5 @@
-/**
- * Companion to process-guards.test.ts, which mocks the logger wholesale and so
- * cannot catch a broken logging contract. This file uses the REAL logger and
- * asserts the stack actually reaches the log file — the failure mode that
- * shipped undetected in the first round (CR-001).
- */
+/** Uses the REAL logger — process-guards.test.ts mocks it and so cannot catch a
+ *  broken logging contract (CR-001). */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
@@ -39,9 +35,7 @@ describe('installProcessGuards log-file persistence', () => {
     const { logger } = await import('../logger.js');
     const { installProcessGuards } = await import('../process-guards.js');
 
-    // Asserted rather than early-returned: a silent `return` here would make
-    // this test pass vacuously in any environment where log init fails, which
-    // is exactly the coverage this file exists to provide.
+    // Asserted, not early-returned: a silent return would pass vacuously.
     const logPath = logger.getLogFilePath();
     expect(logPath).toBeTruthy();
 
@@ -58,7 +52,7 @@ describe('installProcessGuards log-file persistence', () => {
     const appended = after.slice(before.length);
 
     expect(appended).toContain(marker);
-    // A stack, not just the message — the whole point of relocating it.
+    // A stack, not just the message.
     expect(appended).toMatch(/\n\s+at\s/);
     expect(appended).not.toContain('[object Object]');
   });

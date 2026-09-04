@@ -82,9 +82,6 @@ describe('getCodemieClient spinner behaviour', () => {
     expect(oraFactory).toHaveBeenCalled();
   });
 
-  // The two cases below are the point of the change: the spinner writes to
-  // stderr, so it must follow stderr's TTY-ness, not stdin's.
-
   it('suppresses the spinner when stdout/stderr are redirected but stdin is a TTY', async () => {
     const { ConfigurationError } = await import('../errors.js');
     const { getCodemieClient } = await arrange({

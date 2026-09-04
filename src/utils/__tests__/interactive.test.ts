@@ -57,8 +57,7 @@ describe('isNonInteractiveOutput', () => {
     expect(isNonInteractiveOutput()).toBe(false);
   });
 
-  // The two cases that motivate a separate predicate: input and output are
-  // redirected independently, so the two must be able to disagree.
+  // Input and output redirect independently — the two must be able to disagree.
   it('should track stderr, not stdin, when only stdin is redirected', async () => {
     process.stdin.isTTY = false as unknown as true;
     process.stderr.isTTY = true;
