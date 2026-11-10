@@ -221,6 +221,14 @@ Claude Code injects `!bash` commands as synthetic `type:'user'` messages. The pr
 
 A separate, agent-agnostic integration from the above: each coding tool that exposes its own native hook/telemetry surface (Claude Code today; e.g. a future Cursor integration) gets one `OtlpAgentAdapter` plugin (`src/agents/plugins/<name>/`) that turns those events into CodeMie analytics via `codemie hook --agent <adapter-name>` → proxy daemon spool → analytics API. The dispatch contract, how to add a new native event to an adapter, and how to wire up a new tool are **not** duplicated here — see `docs/ARCHITECTURE-OTLP-PLUGIN.md`. `claude-code-otlp` (`src/agents/plugins/claude-code-otlp/`) is the current reference implementation.
 
+### Rules
+- R1. A new code path that spools or sends a Claude evidence record checks `isStopped(recordKey)` first (and `stopIntentPending` before a send), as the hook, tick and `evidence-send.ts` do; a stopped session never publishes again. Evidence: `src/agents/core/evidence/stop-marker.ts::isStopped`
+
+### Read first
+| When you are | Exemplar | Why this one | Tests |
+|---|---|---|---|
+| adding an OTLP adapter that `codemie proxy status` / `proxy analytics status` should report | `src/cli/commands/proxy/analytics-connectors.ts::ANALYTICS_CONNECTORS` | the one connector table both commands read; shows detection, collection and formatting per connector | `src/cli/commands/proxy/__tests__/analytics-connectors.test.ts::ANALYTICS_CONNECTORS` |
+
 ---
 
 ## Other Managed Agents

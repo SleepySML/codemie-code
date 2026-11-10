@@ -115,7 +115,7 @@ interface ProxyPlugin {
 ```
 (`src/providers/plugins/sso/proxy/plugins/types.ts::ProxyPlugin`)
 
-**`ProxyInterceptor` hooks** (all optional): `onProxyStart`, `onRequest`, `onResponseHeaders`, `onResponseChunk`, `onResponseComplete`, `onProxyStop`, `onError`.
+**`ProxyInterceptor` hooks** (all optional): `onProxyStart`, `onRequest`, `onResponseHeaders`, `onUpstreamResponse`, `onResponseChunk`, `onResponseComplete`, `onProxyStop`, `onError`, `handleRequest`, and `healthStatus` (analytics delivery health for the daemon `/health` reply; the first interceptor that implements it wins — `src/providers/plugins/sso/proxy/sso.proxy.ts::CodeMieProxy`). (`src/providers/plugins/sso/proxy/plugins/types.ts::ProxyInterceptor`)
 
 **`PluginContext` fields**: `config: ProxyConfig`, `logger`, `credentials?: SSOCredentials`, `profileConfig?`.
 

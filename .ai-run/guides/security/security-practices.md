@@ -42,6 +42,8 @@ Built today by `src/providers/plugins/sso/proxy/plugins/header-injection.plugin.
 | `X-CodeMie-Client` | Agent client type |
 | `X-CodeMie-Integration` | Integration/tenant identity |
 | `X-CodeMie-Repository` / `X-CodeMie-Branch` / `X-CodeMie-Project` | Repository/branch/project attribution |
+| `X-CodeMie-Publication-Contract` / `X-CodeMie-Funding-Route` | Analytics publication contract version and frozen funding route (analytics evidence only) |
+| `X-CodeMie-Work-Consent` | Explicit work consent; sent only with a non-blank project (`src/agents/core/evidence/publication-contract.ts::CONSENT_HEADER`) |
 
 Exception: on `/v1/metrics` the plugin does not inject `X-CodeMie-Client`, `X-CodeMie-Repository`, `X-CodeMie-Branch` or `X-CodeMie-Project`. `MetricsApiClient` sets them, the client from its sender's client type, the other three from the metric's attributes.
 
@@ -54,6 +56,8 @@ Also in scope even though they are body fields, not headers: the Responses API `
 3. **Do not silently normalize** (hash, truncate, hex-prefix) an identifier the server may treat as authoritative — normalization must be an intentional, documented protocol change agreed with the server side.
 4. **Header injection lives in exactly one layer**: `buildAttributionHeaders` in `header-injection.plugin.ts`. Do not add a second injection path (telemetry runtime, adapter, CLI) that competes with it. Known debt, to fix: clients that call CodeMie directly and set their own client headers — `src/providers/plugins/sso/session/processors/metrics/metrics-api-client.ts::MetricsApiClient`, `src/agents/plugins/claude/plugin/statusline.ts::resolveBudget`, `src/cli/commands/skills/lib/skills-search-client.ts`, `src/cli/commands/skills/lib/skills-metrics.ts`, `src/providers/core/codemie-auth-helpers.ts`, `src/providers/plugins/sso/session/processors/conversations/apiClient.ts`.
 5. **Never log full header values** without `sanitizeHeaders()` — attribution headers carry PII (email, repository path).
+6. **A header only analytics evidence carries goes into `ANALYTICS_ONLY_HEADERS`** in `src/agents/core/evidence/publication-contract.ts`, not just into the evidence sender: `HeaderInjectionInterceptor.onRequest` calls `stripAnalyticsOnlyHeaders` so a model request never carries it. Evidence: `src/agents/core/evidence/publication-contract.ts::stripAnalyticsOnlyHeaders`
+7. **Read and write explicit work consent only through `src/agents/core/evidence/consent-store.ts`** (`~/.codemie/work-consent.json` via `getCodemiePath`), never in a profile, workspace or repo config; the evidence record holds only the path-free `consentRef`. Evidence: `src/agents/core/evidence/consent-store.ts::consentStorePath`
 
 ### Bad vs. Good
 
